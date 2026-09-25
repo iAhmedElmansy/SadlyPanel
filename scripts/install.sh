@@ -181,9 +181,10 @@ ENVEOF
   ok "Created $ENV_FILE"
   set -a; source "$ENV_FILE" 2>/dev/null; set +a
 
-  # prisma
+  # prisma — run from the panel workspace so Prisma loads apps/panel/.env
+  # (DATABASE_URL). From the repo root it can't find that .env and fails P1012.
   log "Running database migrations…"
-  npx prisma db push --schema apps/panel/prisma/schema.prisma --accept-data-loss 2>/dev/null || \
+  ( cd "$PANEL_DIR/apps/panel" && npx prisma db push --schema prisma/schema.prisma --accept-data-loss ) || \
     warn "Prisma failed — run manually."
   ok "Database ready."
 

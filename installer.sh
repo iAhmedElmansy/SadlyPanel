@@ -31,7 +31,7 @@ set -euo pipefail
 REPO_URL="${SPANEL_REPO:-https://github.com/iAhmedElmansy/SadlyPanel.git}"
 REPO_BRANCH="${SPANEL_BRANCH:-main}"
 INSTALL_DIR="${SPANEL_DIR:-/var/www/SPanel}"
-INSTALLER_VERSION="1.1.0"
+INSTALLER_VERSION="1.1.1"
 
 # ---- colours + output -----------------------------------------------------
 if [[ -t 1 ]]; then
@@ -311,8 +311,11 @@ prepare_source() {
 
 rebuild_panel() {
   log "Applying database schema…"
-  ( cd "$INSTALL_DIR" && npx prisma db push \
-      --schema apps/panel/prisma/schema.prisma --accept-data-loss ) || \
+  # Run from the panel workspace so Prisma loads apps/panel/.env (which holds
+  # DATABASE_URL). From the repo root Prisma only checks the root and the
+  # schema folder for .env — neither has it — and dies with P1012.
+  ( cd "$INSTALL_DIR/apps/panel" && npx prisma db push \
+      --schema prisma/schema.prisma --accept-data-loss ) || \
     die "prisma db push failed."
   ok "Schema up to date."
 

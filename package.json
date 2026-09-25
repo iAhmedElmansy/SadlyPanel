@@ -1,6 +1,6 @@
 {
   "name": "spanel",
-  "version": "4.1.1",
+  "version": "4.1.2",
   "private": true,
   "description": "SadlyStudios Panel — game/application/web hosting control panel (Panel + Daemon)",
   "license": "MIT",
