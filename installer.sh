@@ -31,7 +31,7 @@ set -euo pipefail
 REPO_URL="${SPANEL_REPO:-https://github.com/iAhmedElmansy/SadlyPanel.git}"
 REPO_BRANCH="${SPANEL_BRANCH:-main}"
 INSTALL_DIR="${SPANEL_DIR:-/var/www/SPanel}"
-INSTALLER_VERSION="1.1.1"
+INSTALLER_VERSION="1.1.2"
 
 # ---- colours + output -----------------------------------------------------
 if [[ -t 1 ]]; then

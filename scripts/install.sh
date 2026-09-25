@@ -364,11 +364,19 @@ install_daemon() {
   chown -R spanel:spanel "$DATA_DIR" /var/log/spanel 2>/dev/null || true
   ok "Directories ready."
 
-  # symlink daemon
-  if [[ ! -e /opt/spanel-daemon ]]; then
-    ln -sf "$PANEL_DIR/apps/daemon" /opt/spanel-daemon
-    ok "Linked /opt/spanel-daemon → $PANEL_DIR/apps/daemon"
+  # symlink daemon → workspace. A previous standalone daemon.mjs run may have
+  # left /opt/spanel-daemon as a real (source-less) directory; that would keep
+  # the ExecStart target (/opt/spanel-daemon/dist/index.js) empty and the
+  # service would fail to start. Always (re)point it at the workspace.
+  local DAEMON_LINK_SRC="$PANEL_DIR/apps/daemon"
+  if [[ -L /opt/spanel-daemon || ! -e /opt/spanel-daemon ]]; then
+    ln -sfn "$DAEMON_LINK_SRC" /opt/spanel-daemon
+  else
+    rm -rf /opt/spanel-daemon
+    ln -s "$DAEMON_LINK_SRC" /opt/spanel-daemon
+    warn "Replaced a stale /opt/spanel-daemon directory with a symlink."
   fi
+  ok "Linked /opt/spanel-daemon → $DAEMON_LINK_SRC"
 
   # install deps + build
   cd "$PANEL_DIR"
