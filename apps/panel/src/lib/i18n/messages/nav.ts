@@ -1,0 +1,112 @@
+import type { Locale } from "../config";
+
+/**
+ * Navigation labels — sidebar sections + items for client and admin nav,
+ * plus topbar chrome. Namespace: `nav.*`
+ *
+ * Keys mirror the NavSection titles / NavItem labels in nav-items.ts. The
+ * layouts translate by key at render time so nav-items.ts stays serializable.
+ */
+
+const en = {
+  // section titles — client
+  home: "Home",
+  servers: "Servers",
+  webHosting: "Web hosting",
+  catalog: "Catalog",
+  support: "Support",
+  account: "Account",
+  // section titles — admin
+  overview: "Overview",
+  infrastructure: "Infrastructure",
+  serversServices: "Servers & services",
+  billing: "Billing",
+  system: "System",
+  // client items
+  overviewItem: "Overview",
+  myServers: "My servers",
+  createServer: "Create server",
+  webHostingItem: "Web Hosting",
+  plans: "Plans",
+  packages: "Packages",
+  tickets: "Tickets",
+  serviceStatus: "Service status",
+  accountItem: "Account",
+  // admin items
+  adminOverview: "Admin overview",
+  activity: "Activity",
+  nodes: "Nodes",
+  locations: "Locations",
+  ports: "Ports",
+  databaseHosts: "Database hosts",
+  allServers: "All servers",
+  services: "Services",
+  mounts: "Mounts",
+  status: "Status & incidents",
+  users: "Users",
+  roles: "Roles",
+  domains: "Domains",
+  siteSettings: "Site settings",
+  // topbar / shell
+  admin: "admin",
+  accountSettings: "Account settings",
+  adminArea: "Admin area",
+  backToDashboard: "Back to dashboard",
+  openNav: "Open navigation",
+  closeNav: "Close navigation",
+  notifications: "Notifications",
+  language: "Language",
+  theme: "Theme",
+  themeDark: "Dark",
+  themeLight: "Light",
+} as const;
+
+const ar: Record<keyof typeof en, string> = {
+  home: "الرئيسية",
+  servers: "الخوادم",
+  webHosting: "استضافة المواقع",
+  catalog: "الكتالوج",
+  support: "الدعم",
+  account: "الحساب",
+  overview: "نظرة عامة",
+  infrastructure: "البنية التحتية",
+  serversServices: "الخوادم والخدمات",
+  billing: "الفوترة",
+  system: "النظام",
+  overviewItem: "نظرة عامة",
+  myServers: "خوادمي",
+  createServer: "إنشاء خادم",
+  webHostingItem: "استضافة المواقع",
+  plans: "الخطط",
+  packages: "الباقات",
+  tickets: "التذاكر",
+  serviceStatus: "حالة الخدمة",
+  accountItem: "الحساب",
+  adminOverview: "نظرة عامة للمشرف",
+  activity: "النشاط",
+  nodes: "العُقد",
+  locations: "المواقع",
+  ports: "المنافذ",
+  databaseHosts: "مضيفات قواعد البيانات",
+  allServers: "كل الخوادم",
+  services: "الخدمات",
+  mounts: "نقاط التحميل",
+  status: "الحالة والأعطال",
+  users: "المستخدمون",
+  roles: "الأدوار",
+  domains: "النطاقات",
+  siteSettings: "إعدادات الموقع",
+  admin: "مشرف",
+  accountSettings: "إعدادات الحساب",
+  adminArea: "منطقة الإدارة",
+  backToDashboard: "العودة إلى لوحة التحكم",
+  openNav: "فتح التنقل",
+  closeNav: "إغلاق التنقل",
+  notifications: "الإشعارات",
+  language: "اللغة",
+  theme: "المظهر",
+  themeDark: "داكن",
+  themeLight: "فاتح",
+};
+
+export const nav: Record<Locale, Record<keyof typeof en, string>> = { en, ar };

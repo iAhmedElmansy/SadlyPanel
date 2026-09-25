@@ -1,0 +1,55 @@
+# SPanel daemon — local development config.
+#
+# Copy this file to `config.yml` in this folder (or to ~/.spanel/config.yml)
+# and fill in the three values from the panel:
+#   Admin → Nodes → your node → Install
+#
+#   cp config.example.yml config.yml     # then edit token_id/token/remote
+#
+# Then run the daemon in development mode. On Windows without Docker, set
+# SPANEL_SKIP_DOCKER=1 so it boots without the engine:
+#
+#   SPANEL_SKIP_DOCKER=1 npm run dev
+#
+# Paths left unset default to ~/.spanel on non-Linux hosts, so nothing is
+# written to system directories during local development.
+
+debug: true
+
+# Local dev without Docker: set true so the daemon boots without the engine.
+# (Equivalent to the SPANEL_SKIP_DOCKER=1 env var.)
+skip_docker: true
+
+api:
+  host: 127.0.0.1
+  port: 8080
+  ssl:
+    enabled: false
+    cert: ""
+    key: ""
+  upload_limit: 256
+
+system:
+  # Leave `data` unset to use the per-user default (~/.spanel/volumes).
+  timezone: UTC
+  sftp:
+    bind_port: 2022
+
+docker:
+  network:
+    name: spanel0
+    driver: bridge
+    interface: 172.19.0.1
+    dns:
+      - 1.1.1.1
+      - 8.8.8.8
+  install_limit: 5
+
+proxy:
+  # Disabled for local development: no nginx/vhosts on a dev machine.
+  enabled: false
+
+# --- Fill these in from the panel ---
+remote: https://your-panel.example.com
+token_id: REPLACE_WITH_TOKEN_ID
+token: REPLACE_WITH_TOKEN

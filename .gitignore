@@ -1,0 +1,63 @@
+node_modules/
+.next/
+out/
+dist/
+build/
+coverage/
+
+# env
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# secrets — never commit a real daemon config, it contains a node token
+config.yml
+!apps/daemon/config.example.yml
+.spanel-local/
+
+# one-off local dev / debug helpers.
+# These hold real server credentials (SSH passwords, node tokens, APP_KEYs)
+# and are useless to anyone else — they stay on the maintainer's machine.
+scripts/deploy-daemon*.js
+scripts/check-*.js
+scripts/fix-*.js
+scripts/encrypt-token.js
+scripts/decrypt-token.js
+scripts/update-tokens.js
+scripts/test-daemon.js
+scripts/test-daemon.sh
+scripts/diagnose.sh
+
+# local build / release artifacts
+*.zip
+*.tar.gz
+.probe/
+probe.mjs
+
+# database
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+prisma/dev.db*
+
+# runtime data
+data/
+storage/
+uploads/
+public/uploads/*
+!public/uploads/.gitkeep
+logs/
+*.log
+npm-debug.log*
+yarn-error.log*
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.tsbuildinfo
+next-env.d.ts

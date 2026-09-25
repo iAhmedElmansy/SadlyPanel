@@ -1,0 +1,39 @@
+{
+  "name": "spanel",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SPanel — game/application/web hosting control panel (Panel + Daemon)",
+  "license": "MIT",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @spanel/panel",
+    "dev:daemon": "npm run dev --workspace @spanel/daemon",
+    "build": "npm run build --workspace @spanel/panel && npm run build --workspace @spanel/daemon",
+    "start": "npm run start --workspace @spanel/panel",
+    "start:daemon": "npm run start --workspace @spanel/daemon",
+    "typecheck": "npm run typecheck --workspace @spanel/panel && npm run typecheck --workspace @spanel/daemon",
+    "test": "npm run test:integration --workspace @spanel/panel && npm run test --workspace @spanel/daemon",
+    "test:integration": "npm run test:integration --workspace @spanel/panel",
+    "test:daemon": "npm run test --workspace @spanel/daemon",
+    "test:remote": "npm run test:remote --workspace @spanel/panel",
+    "test:smoke": "node scripts/smoke-test.mjs",
+    "db:push": "npm run db:push --workspace @spanel/panel",
+    "db:seed": "npm run db:seed --workspace @spanel/panel",
+    "db:studio": "npm run db:studio --workspace @spanel/panel",
+    "setup": "npm install && npm run db:push && npm run db:seed"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "allowScripts": {
+    "prisma@6.19.3": true,
+    "@prisma/client@6.19.3": true,
+    "@prisma/engines@6.19.3": true,
+    "esbuild@0.28.2": true
+  },
+  "devDependencies": {
+    "puppeteer-core": "^25.11.0"
+  }
+}

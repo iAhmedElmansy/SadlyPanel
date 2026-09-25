@@ -1,0 +1,19 @@
+# The shell scripts in this repo are fetched over HTTP and run on Linux.
+# A CRLF line ending turns `#!/usr/bin/env bash` into `env bash\r` and the
+# installer dies with "$'\r': command not found" — so normalise to LF.
+* text=auto eol=lf
+
+*.sh      text eol=lf
+*.mjs     text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.webp    binary
+*.woff    binary
+*.woff2   binary
+*.db      binary

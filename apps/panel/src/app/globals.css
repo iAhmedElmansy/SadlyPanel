@@ -1,0 +1,1067 @@
+@import "tailwindcss";
+
+@theme {
+  /* Obsidian — true-black monochrome. The former indigo brand is now platinum;
+     semantic ok/warn/bad stay (refined) as functional signals; info is a neutral
+     silver so no blue leaks into the ambient gradients. */
+  --color-canvas: #07070a;
+  --color-surface: #0c0c0f;
+  --color-surface-2: #141418;
+  --color-surface-3: #1d1d22;
+  --color-line: #2a2a31;
+  --color-line-soft: #18181c;
+  --color-ink: #f4f4f2;
+  --color-ink-muted: #a3a3a8;
+  --color-ink-dim: #6c6c72;
+  --color-brand: #f5f5f3;
+  --color-brand-soft: #e6e6e3;
+  --color-brand-dim: #4a4a4f;
+  --color-ok: #3ecf8e;
+  --color-warn: #e0a53f;
+  --color-bad: #f0574d;
+  --color-info: #9a9aa0;
+
+  /* Typographic identity - self-hosted via next/font (see app/layout.tsx):
+     Sora (geometric display), IBM Plex Sans Arabic (body; carries BOTH the
+     Latin and Arabic voices so en/ar read as one design), JetBrains Mono
+     (utility: eyebrows, consoles, telemetry). Fallbacks keep the stacks safe
+     if the font vars are ever absent. */
+  --font-display: var(--font-sora), var(--font-plex), ui-sans-serif, system-ui, sans-serif;
+  --font-sans: var(--font-plex), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-jb), ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+
+  /* Elevation — layered shadows tuned for the dark canvas (soft ambient + tight
+     contact). Consumed by .panel-card / .elevated / dropdowns/modals. Light
+     theme softens these below. */
+  --shadow-sm: 0 1px 2px rgba(2, 4, 10, 0.4);
+  --shadow-md: 0 8px 24px -8px rgba(2, 4, 10, 0.55), 0 2px 6px -2px rgba(2, 4, 10, 0.4);
+  --shadow-lg: 0 24px 60px -18px rgba(2, 4, 10, 0.7), 0 6px 16px -6px rgba(2, 4, 10, 0.5);
+  --shadow-brand: 0 14px 44px -18px color-mix(in srgb, var(--color-brand) 22%, transparent);
+
+  /* Motion — shared easing + durations so every surface animates identically. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --dur-fast: 120ms;
+  --dur-base: 200ms;
+  --dur-slow: 320ms;
+}
+
+/**
+ * Light theme — overrides the @theme color variables when <html data-theme="light">.
+ * Only colors change; radii/fonts are shared. Applied client-side (data-theme),
+ * fully independent of language. Dark is the default (variables above).
+ */
+[data-theme="light"] {
+  /* Monochrome light — the black-accent counterpart: near-white canvas, a black
+     "brand", refined semantic colors, neutral (grey) info. */
+  --color-canvas: #f6f6f4;
+  --color-surface: #ffffff;
+  --color-surface-2: #f0f0ee;
+  --color-surface-3: #e6e6e3;
+  --color-line: #dcdcd8;
+  --color-line-soft: #ececea;
+  --color-ink: #0a0a0a;
+  --color-ink-muted: #4a4a4a;
+  --color-ink-dim: #6b6b6b;
+  --color-brand: #111111;
+  --color-brand-soft: #000000;
+  --color-brand-dim: #c9c9c6;
+  --color-ok: #0f9d63;
+  --color-warn: #b8791a;
+  --color-bad: #d23b32;
+  --color-info: #6b6b6b;
+
+  /* Lighter, tighter elevation on the bright canvas. */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+  --shadow-md: 0 10px 24px -10px rgba(15, 23, 42, 0.12), 0 2px 6px -2px rgba(15, 23, 42, 0.08);
+  --shadow-lg: 0 24px 60px -20px rgba(15, 23, 42, 0.18), 0 6px 16px -6px rgba(15, 23, 42, 0.1);
+  --shadow-brand: 0 12px 40px -14px color-mix(in srgb, var(--color-brand) 30%, transparent);
+
+  /* The dark-theme top-sheen assumes a light-on-dark plate; flip its logic. */
+  .panel-card {
+    box-shadow:
+      var(--shadow-md),
+      inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  }
+  .btn-primary {
+    background: var(--color-brand);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-brand) 88%, var(--color-canvas));
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    background-color: var(--color-canvas);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand) 40%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-soft);
+    outline-offset: 2px;
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-surface-3);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-line);
+    background-clip: content-box;
+  }
+
+  input,
+  select,
+  textarea,
+  button {
+    font: inherit;
+  }
+}
+
+/**
+ * RTL support (Arabic). The layout uses logical properties where possible; a few
+ * shell primitives use physical left/padding for the fixed sidebar. These
+ * overrides mirror them under dir="rtl" without touching component markup.
+ */
+[dir="rtl"] .app-shell {
+  background:
+    radial-gradient(1200px 600px at 88% -10%, color-mix(in srgb, var(--color-brand) 14%, transparent), transparent 60%),
+    radial-gradient(900px 500px at 0% 0%, color-mix(in srgb, var(--color-info) 8%, transparent), transparent 55%),
+    var(--color-canvas);
+}
+[dir="rtl"] .rtl-sidebar {
+  left: auto;
+  right: 0;
+  border-right: none;
+  border-left: 1px solid var(--color-line);
+}
+[dir="rtl"] .rtl-content {
+  padding-left: 0;
+}
+@media (min-width: 1024px) {
+  [dir="rtl"] .rtl-content {
+    padding-right: 15rem;
+  }
+}
+[dir="rtl"] .rtl-drawer {
+  left: auto;
+  right: 0;
+  border-right: none;
+  border-left: 1px solid var(--color-line);
+}
+
+@layer components {
+  .app-shell {
+    background:
+      radial-gradient(1200px 600px at 12% -10%, color-mix(in srgb, var(--color-brand) 14%, transparent), transparent 60%),
+      radial-gradient(900px 500px at 100% 0%, color-mix(in srgb, var(--color-info) 8%, transparent), transparent 55%),
+      var(--color-canvas);
+  }
+
+  .panel-card {
+    background:
+      linear-gradient(180deg, color-mix(in srgb, var(--color-ink) 3.5%, transparent), transparent 22%),
+      linear-gradient(180deg, color-mix(in srgb, var(--color-surface-2) 85%, transparent), var(--color-surface));
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-lg);
+    /* Layered elevation: ambient drop + a hairline of light along the top
+       edge, so every card reads as a physical plate lit from above. */
+    box-shadow:
+      var(--shadow-md),
+      inset 0 1px 0 color-mix(in srgb, var(--color-ink) 7%, transparent);
+  }
+
+  /* Interactive surface: a calm hover lift for clickable cards (server cards,
+     status items, plan tiles). Purposeful, not flashy. */
+  .lift {
+    transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out),
+      box-shadow var(--dur-base) var(--ease-out);
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in srgb, var(--color-brand) 40%, var(--color-line));
+    box-shadow: var(--shadow-lg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .lift {
+      transition: border-color var(--dur-base) var(--ease-out);
+    }
+    .lift:hover {
+      transform: none;
+    }
+  }
+
+  .glass {
+    background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+    backdrop-filter: blur(18px) saturate(150%);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+  }
+
+  .input-base {
+    width: 100%;
+    background: var(--color-canvas);
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-sm);
+    padding: 0.55rem 0.75rem;
+    font-size: 0.875rem;
+    color: var(--color-ink);
+    transition: border-color 120ms ease, box-shadow 120ms ease;
+  }
+  .input-base::placeholder {
+    color: var(--color-ink-dim);
+  }
+  .input-base:focus {
+    outline: none;
+    border-color: var(--color-brand);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-brand) 22%, transparent);
+  }
+  .input-base:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-sm);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.55rem 0.9rem;
+    border: 1px solid transparent;
+    transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease, transform 120ms ease;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+  .btn:active:not(:disabled) {
+    transform: translateY(1px);
+  }
+
+  .btn-primary {
+    background: linear-gradient(180deg, color-mix(in srgb, var(--color-brand) 92%, #ffffff), var(--color-brand));
+    /* Invert against the canvas so the platinum (dark theme) / black (light
+       theme) button always carries readable contrast text. */
+    color: var(--color-canvas);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease,
+      transform 120ms ease, box-shadow var(--dur-base) var(--ease-out);
+  }
+  .btn-primary:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-brand) 88%, var(--color-canvas));
+    box-shadow: var(--shadow-brand);
+  }
+
+  .btn-ghost {
+    background: var(--color-surface-2);
+    border-color: var(--color-line);
+    color: var(--color-ink);
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--color-surface-3);
+  }
+
+  .btn-danger {
+    background: color-mix(in srgb, var(--color-bad) 18%, transparent);
+    border-color: color-mix(in srgb, var(--color-bad) 45%, transparent);
+    color: #fca5a5;
+  }
+  .btn-danger:hover:not(:disabled) {
+    background: color-mix(in srgb, var(--color-bad) 28%, transparent);
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border-radius: 999px;
+    padding: 0.15rem 0.55rem;
+    font-family: var(--font-mono);
+    font-size: 0.625rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    border: 1px solid;
+  }
+
+  /* Per-section identity label: accent-tinted, with an underline bar that the
+     SectionLabel component draws in on scroll. --section-accent is set inline
+     per section so each part carries its own colour. */
+  .section-label {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    /* Utility voice: eyebrows read like telemetry channel tags. */
+    font-family: var(--font-mono);
+  }
+  .section-label-bar {
+    display: block;
+    height: 2px;
+    width: 2.25rem;
+    border-radius: 999px;
+    background: linear-gradient(
+      90deg,
+      var(--section-accent, var(--color-brand)),
+      color-mix(in srgb, var(--section-accent, var(--color-brand)) 20%, transparent)
+    );
+    box-shadow: 0 0 12px color-mix(in srgb, var(--section-accent, var(--color-brand)) 45%, transparent);
+  }
+
+  /* Per-section decorative backdrops (SectionBackdrop). Each variant is a
+     different CSS-only pattern tinted by --section-accent, edge-faded with a
+     mask so it never fights the content. */
+  .sbg {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    opacity: 0.8;
+  }
+  .sbg--glow {
+    background:
+      radial-gradient(38rem 20rem at 10% -12%, color-mix(in srgb, var(--section-accent) 15%, transparent), transparent 60%),
+      radial-gradient(30rem 18rem at 92% 112%, color-mix(in srgb, var(--section-accent) 11%, transparent), transparent 60%);
+  }
+  .sbg--grid {
+    background-image:
+      linear-gradient(color-mix(in srgb, var(--section-accent) 9%, transparent) 1px, transparent 1px),
+      linear-gradient(90deg, color-mix(in srgb, var(--section-accent) 9%, transparent) 1px, transparent 1px);
+    background-size: 42px 42px;
+    -webkit-mask-image: radial-gradient(62% 62% at 50% 38%, #000, transparent 78%);
+    mask-image: radial-gradient(62% 62% at 50% 38%, #000, transparent 78%);
+  }
+  .sbg--dots {
+    background-image: radial-gradient(color-mix(in srgb, var(--section-accent) 24%, transparent) 1.2px, transparent 1.4px);
+    background-size: 22px 22px;
+    -webkit-mask-image: radial-gradient(72% 62% at 82% 28%, #000, transparent 76%);
+    mask-image: radial-gradient(72% 62% at 82% 28%, #000, transparent 76%);
+  }
+  .sbg--beams {
+    background: repeating-linear-gradient(
+      118deg,
+      transparent 0 22px,
+      color-mix(in srgb, var(--section-accent) 7%, transparent) 22px 23px
+    );
+    -webkit-mask-image: linear-gradient(90deg, #000, transparent 82%);
+    mask-image: linear-gradient(90deg, #000, transparent 82%);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .sbg--glow {
+      animation: sbg-drift 14s var(--ease-in-out) infinite alternate;
+    }
+  }
+  @keyframes sbg-drift {
+    to {
+      background-position: 3% -6%, -3% 6%;
+    }
+  }
+
+  .table-base {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 0.875rem;
+  }
+  .table-base thead th {
+    text-align: start;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--color-ink-dim);
+    padding: 0.65rem 0.9rem;
+    border-bottom: 1px solid var(--color-line);
+    background: color-mix(in srgb, var(--color-surface-2) 55%, transparent);
+    white-space: nowrap;
+  }
+  .table-base tbody td {
+    padding: 0.7rem 0.9rem;
+    border-bottom: 1px solid var(--color-line-soft);
+    vertical-align: middle;
+  }
+  .table-base tbody tr:last-child td {
+    border-bottom: none;
+  }
+  .table-base tbody tr:hover {
+    background: color-mix(in srgb, var(--color-surface-2) 45%, transparent);
+  }
+
+  .console-shell {
+    background: #060607;
+    border: 1px solid var(--color-line);
+    border-radius: var(--radius-md);
+  }
+}
+
+@layer utilities {
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .animate-in {
+    animation: fade-rise var(--dur-base) var(--ease-out) both;
+  }
+  .elevated {
+    box-shadow: var(--shadow-md);
+  }
+  .elevated-lg {
+    box-shadow: var(--shadow-lg);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .animate-in {
+      animation: none;
+    }
+  }
+  .spin {
+    animation: spin 800ms linear infinite;
+  }
+  .animate-shimmer {
+    background-image: linear-gradient(
+      100deg,
+      color-mix(in srgb, var(--color-surface-2) 90%, transparent) 0%,
+      color-mix(in srgb, var(--color-surface-3) 95%, transparent) 50%,
+      color-mix(in srgb, var(--color-surface-2) 90%, transparent) 100%
+    );
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+  .animate-pulse-soft {
+    animation: pulse-soft 1.6s ease-in-out infinite;
+  }
+}
+
+@keyframes fade-rise {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.45;
+  }
+}
+
+/* Scroll-reveal: elements start lowered + faded and rise into place when the
+   IntersectionObserver adds .is-visible (see Reveal component). */
+.reveal {
+  opacity: 0;
+  transform: translateY(22px);
+  transition:
+    opacity var(--dur-slow) var(--ease-out),
+    transform var(--dur-slow) var(--ease-out);
+  will-change: opacity, transform;
+}
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* Reveal directional variants (opt-in via the `direction` prop on Reveal). */
+.reveal-left {
+  transform: translateX(-24px);
+}
+.reveal-right {
+  transform: translateX(24px);
+}
+.reveal-scale {
+  transform: scale(0.94);
+}
+.reveal-left.is-visible,
+.reveal-right.is-visible,
+.reveal-scale.is-visible {
+  transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .reveal-left,
+  .reveal-right,
+  .reveal-scale {
+    transform: none;
+  }
+}
+
+/* Tilt card (game features): 3D tip toward the pointer + a platinum specular
+   sheen that tracks the cursor. Falls back to a static card when JS is off. */
+.tilt-card {
+  position: relative;
+  transition: transform var(--dur-base) var(--ease-out), border-color var(--dur-base) var(--ease-out);
+  will-change: transform;
+}
+.tilt-card:hover {
+  border-color: color-mix(in srgb, var(--color-brand) 40%, var(--color-line));
+}
+.tilt-sheen {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--sheen, 0);
+  transition: opacity var(--dur-base) var(--ease-out);
+  background: radial-gradient(
+    20rem 20rem at var(--mx, 50%) var(--my, 0%),
+    color-mix(in srgb, var(--color-brand) 34%, transparent),
+    transparent 62%
+  );
+}
+@media (prefers-reduced-motion: reduce) {
+  .tilt-card {
+    transition: border-color var(--dur-base) var(--ease-out);
+  }
+  .tilt-sheen {
+    display: none;
+  }
+}
+
+/* Spotlight card (pricing): a soft radial highlight follows the pointer. */
+.spotlight-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+  opacity: var(--spot, 0);
+  transition: opacity var(--dur-slow) var(--ease-out);
+  background: radial-gradient(
+    24rem 24rem at var(--mx, 50%) var(--my, 50%),
+    color-mix(in srgb, var(--color-brand) 28%, transparent),
+    transparent 62%
+  );
+}
+.spotlight-card > * {
+  position: relative;
+  z-index: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .spotlight-card::before {
+    display: none;
+  }
+}
+
+/* CTA "ready to deploy" card: a light travels continuously around the border
+   via a rotating conic gradient masked to a 1px ring. Signals a live, energized
+   call to action — a motion vocabulary used nowhere else on the page. Falls back
+   to a soft static ring under reduced motion (or where @property is unsupported). */
+@property --beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+.beam-card {
+  position: relative;
+}
+.beam-card::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  padding: 1px;
+  pointer-events: none;
+  z-index: 0;
+  background: conic-gradient(
+    from var(--beam-angle),
+    transparent 0deg,
+    color-mix(in srgb, var(--color-brand) 85%, transparent) 55deg,
+    transparent 130deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: beam-spin 6s linear infinite;
+}
+.beam-card > * {
+  position: relative;
+  z-index: 1;
+}
+@keyframes beam-spin {
+  to {
+    --beam-angle: 360deg;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .beam-card::before {
+    animation: none;
+    background: color-mix(in srgb, var(--color-brand) 30%, transparent);
+  }
+}
+
+/* Status: a slow "breathing" pulse for an operational banner — signals live
+   monitoring. Emerald is meaningful here (health). */
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-ok) 30%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--color-ok) 0%, transparent);
+  }
+}
+.breathe {
+  animation: breathe 3.2s var(--ease-in-out) infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .breathe {
+    animation: none;
+  }
+}
+
+/* ============================================================================
+   studiors-style signature FX (public site only)
+   ==========================================================================*/
+
+/* Lenis smooth scroll — recommended resets so inertial scroll behaves. */
+html.lenis,
+html.lenis body {
+  height: auto;
+}
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+/* Film grain — a faint animated noise field over the whole page for texture.
+   Decorative + pointer-transparent; the animation stills under reduced motion. */
+.grain {
+  position: fixed;
+  inset: -50%;
+  z-index: 60;
+  width: 200%;
+  height: 200%;
+  pointer-events: none;
+  opacity: 0.045;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  animation: grain-shift 0.6s steps(4) infinite;
+}
+@keyframes grain-shift {
+  0% { transform: translate(0, 0); }
+  25% { transform: translate(-3%, 2%); }
+  50% { transform: translate(2%, -3%); }
+  75% { transform: translate(-2%, -1%); }
+  100% { transform: translate(1%, 3%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .grain { animation: none; }
+}
+
+/* Studio signature wordmark below the footer. Oversized, low-contrast and
+   clipped to a slim band; decorative only, so it takes no pointer events and
+   can be neither selected nor dragged. */
+.brand-signature {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+  padding-block: clamp(0.75rem, 2.5vw, 2rem);
+}
+.brand-signature-text {
+  display: block;
+  white-space: nowrap;
+  line-height: 0.9;
+  font-family: var(--font-display);
+  font-weight: 800;
+  letter-spacing: -0.045em;
+  font-size: clamp(2.5rem, 15vw, 13rem);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--color-ink) 12%, transparent),
+    color-mix(in srgb, var(--color-ink) 3%, transparent)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  -webkit-user-drag: none;
+}
+
+/* ── Landing genuine-3D stages ─────────────────────────────────────────────
+   Shared perspective containers for the per-section 3D display methods. Every
+   section owns a DIFFERENT depth choreography — depth conveyor (how-it-works),
+   turning multi-plane device (web hosting), flip-up platform (pricing),
+   push-from-depth portal (CTA), floating console (hero) — each driven by GSAP
+   in its matching client component. The perspective lives on the stage; the
+   moving element carries `.d3` (transform-style: preserve-3d) so its own layers
+   keep real depth against one another. `.d3-flat` marks a leaf that only tilts
+   on its own axis (per-element transformPerspective set from JS).
+
+   Progressive enhancement: under reduced motion the stages collapse to a flat
+   projection and preserve-3d is dropped, so nothing on the page depends on a 3D
+   transform to be laid out or readable. The moving components also no-op their
+   GSAP under reduced motion (useGsap), so the steady CSS state is what shows. */
+.stage-3d {
+  perspective: 1400px;
+  perspective-origin: 50% 42%;
+}
+.stage-3d-near {
+  perspective: 1000px;
+  perspective-origin: 50% 45%;
+}
+.d3 {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+/* A layer parked at a fixed depth inside a `.d3` parent — used for the plates
+   that shear past each other (glow behind, chrome/badge in front). */
+.d3-layer {
+  transform-style: preserve-3d;
+}
+@media (prefers-reduced-motion: reduce) {
+  .stage-3d,
+  .stage-3d-near {
+    perspective: none;
+  }
+  .d3,
+  .d3-layer {
+    transform-style: flat;
+    will-change: auto;
+    transform: none !important;
+  }
+}
+
+/* Custom cursor — a 1:1 dot + an easing ring that swells over interactive
+   targets and can carry a contextual label. Native cursor is hidden only while
+   the JS cursor is mounted (.has-cursor on <html>), so no-JS keeps its cursor. */
+.has-cursor,
+.has-cursor a,
+.has-cursor button,
+.has-cursor [role="button"],
+.has-cursor input,
+.has-cursor textarea,
+.has-cursor select,
+.has-cursor [data-cursor-label] {
+  cursor: none;
+}
+.cursor-dot,
+.cursor-ring {
+  position: fixed;
+  top: 0;
+  left: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0;
+}
+/* Theme-aware ink colour (light on dark theme, dark on light) keeps the cursor
+   visible over any section — it's the same token body text uses — and a soft
+   canvas-coloured halo lifts it off busy cards and the constellation behind.
+   No blend mode, so it never washes out to invisible over mid-tone areas. */
+.cursor-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--color-ink);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--color-canvas) 72%, transparent);
+}
+.cursor-ring {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1.5px solid color-mix(in srgb, var(--color-ink) 78%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--color-canvas) 55%, transparent);
+  transition: width 0.28s var(--ease-out), height 0.28s var(--ease-out),
+    background-color 0.28s var(--ease-out), border-color 0.28s var(--ease-out);
+}
+.cursor-ring.is-active {
+  width: 62px;
+  height: 62px;
+  background: color-mix(in srgb, var(--color-ink) 12%, transparent);
+  border-color: var(--color-ink);
+}
+.cursor-ring.has-label {
+  width: 92px;
+  height: 92px;
+  background: var(--color-ink);
+  border-color: transparent;
+}
+.cursor-ring__label {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-canvas);
+  opacity: 0;
+  transition: opacity 0.2s var(--ease-out);
+}
+.cursor-ring.has-label .cursor-ring__label {
+  opacity: 1;
+}
+
+/* Preloader — full-bleed intro with a running counter + scrolling wordmark,
+   then the curtain lifts. A pure-CSS fallback lifts it even without JS; JS tags
+   .is-js to take over. Hidden entirely under reduced motion. */
+.preloader {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  display: grid;
+  place-items: center;
+  background: var(--color-canvas);
+  transition: transform 0.9s var(--ease-in-out), opacity 0.6s var(--ease-out);
+  animation: preloader-fallback 0.9s var(--ease-in-out) 5s forwards;
+}
+.preloader.is-js {
+  animation: none;
+}
+.preloader.is-lift {
+  transform: translateY(-100%);
+  opacity: 0;
+}
+.preloader__marquee {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 100%;
+  overflow: hidden;
+  transform: translateY(-50%);
+  opacity: 0.06;
+}
+.preloader__track {
+  display: flex;
+  width: max-content;
+  white-space: nowrap;
+  font: 700 clamp(3rem, 11vw, 9rem) / 1 var(--font-display);
+  text-transform: uppercase;
+  animation: marquee-x 20s linear infinite;
+}
+.preloader__track span {
+  padding-right: 0.3em;
+}
+.preloader__track em {
+  font-style: normal;
+  color: var(--color-brand-dim);
+}
+.preloader__counter {
+  position: absolute;
+  right: 6vw;
+  bottom: 6vh;
+  display: flex;
+  align-items: baseline;
+  gap: 0.15em;
+  font: 600 clamp(2.5rem, 10vw, 7rem) / 1 var(--font-display);
+  color: var(--color-ink);
+}
+.preloader__counter em {
+  font-size: 0.28em;
+  font-style: normal;
+  color: var(--color-ink-dim);
+}
+.preloader__curtain {
+  display: none;
+}
+@keyframes preloader-fallback {
+  to {
+    transform: translateY(-100%);
+    visibility: hidden;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preloader {
+    display: none;
+  }
+}
+
+/* Infinite marquee band — two identical groups translated by exactly one group
+   width for a seamless loop. Pauses on hover; stills under reduced motion. */
+.marquee {
+  width: 100%;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+}
+.marquee__track {
+  display: flex;
+  width: max-content;
+  animation: marquee-x 26s linear infinite;
+}
+.marquee[data-reverse] .marquee__track {
+  animation-direction: reverse;
+}
+.marquee:hover .marquee__track {
+  animation-play-state: paused;
+}
+.marquee__group {
+  display: flex;
+  flex-shrink: 0;
+}
+.marquee__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 1.75rem;
+  padding: 0 1.75rem;
+  font: 600 clamp(1.1rem, 2.2vw, 1.9rem) / 1 var(--font-display);
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--color-ink);
+}
+.marquee__item i {
+  font-style: normal;
+  font-size: 0.7em;
+  color: var(--color-brand-dim);
+}
+@keyframes marquee-x {
+  to {
+    transform: translateX(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .marquee__track {
+    animation: none;
+  }
+}
+
+/* Game-servers deck — progressive-enhancement cover-flow.
+   BASE (no JS / reduced motion / narrow viewport): a plain responsive grid,
+   every card fully readable from markup alone. Only `.is-live` (added by JS
+   when motion is allowed and the viewport is ≥768px) upgrades it to the
+   shared-perspective 3D carousel. */
+.gs-deck {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: 1fr;
+}
+@media (min-width: 640px) {
+  .gs-deck:not(.is-live) {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (min-width: 1024px) {
+  .gs-deck:not(.is-live) {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* Live cover-flow: one shared 3D stage, cards stacked absolutely and placed
+   by the inline transform slideStyle() computes per card. */
+.gs-deck.is-live {
+  position: relative;
+  display: block;
+  min-height: 27rem;
+  perspective: 1500px;
+  perspective-origin: 50% 45%;
+}
+.gs-deck.is-live .gs-slide {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: min(360px, 84vw);
+  transform-style: preserve-3d;
+  transition:
+    transform 0.7s var(--ease-out),
+    opacity 0.7s var(--ease-out),
+    filter 0.7s var(--ease-out),
+    box-shadow 0.7s var(--ease-out);
+  will-change: transform, opacity;
+}
+
+/* Position dots. */
+.gs-dot {
+  height: 0.5rem;
+  width: 0.5rem;
+  border-radius: 9999px;
+  background: var(--color-line);
+  transition:
+    width 0.35s var(--ease-out),
+    background-color 0.35s var(--ease-out);
+}
+.gs-dot:hover {
+  background: var(--color-ink-dim);
+}
+.gs-dot.is-on {
+  width: 1.5rem;
+  background: var(--color-brand);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gs-deck.is-live .gs-slide {
+    transition: none;
+  }
+}
+
+
+
+
+
+

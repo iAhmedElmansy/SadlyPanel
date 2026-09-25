@@ -1,0 +1,1006 @@
+// SPanel — Prisma schema
+// Default provider is SQLite so the panel boots with zero external services.
+// To use PostgreSQL/MySQL: change `provider` below + DATABASE_URL, then `npm run db:push`.
+// NOTE: SQLite has no native enum/json types, so those columns are stored as
+// String and validated in the application layer (see src/lib/constants.ts).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Platform settings
+// ---------------------------------------------------------------------------
+
+model Setting {
+  key       String   @id
+  value     String
+  encrypted Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@map("settings")
+}
+
+// ---------------------------------------------------------------------------
+// Identity
+// ---------------------------------------------------------------------------
+
+model User {
+  id            Int       @id @default(autoincrement())
+  uuid          String    @unique
+  email         String    @unique
+  username      String    @unique
+  firstName     String
+  lastName      String
+  password      String
+  avatarUrl     String?
+  language      String    @default("en")
+  role          String    @default("user") // user | support | admin
+  rootAdmin     Boolean   @default(false)
+  isActive      Boolean   @default(true)
+  // Global staff permissions (JSON array of STAFF_PERMISSIONS keys). Only
+  // consulted for the "support" role; admins/rootAdmin implicitly get all.
+  // Kept for back-compat; the Role relation below is the new source of truth
+  // when roleId is set (see src/lib/auth/rbac.ts::roleCan).
+  staffPermissions String @default("[]")
+  // Fully-customizable role assignment. Additive/optional: existing users keep
+  // working via the legacy `role` string until a roleId is assigned. SetNull so
+  // deleting a role never deletes users.
+  roleId        Int?
+  totpSecret    String?
+  totpEnabled   Boolean   @default(false)
+  emailVerifiedAt DateTime?
+  // Optional subscription plan assigned to the user. SetNull keeps users when a plan is removed.
+  planId        Int?
+  lastLoginAt   DateTime?
+  lastLoginIp   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  plan          Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
+  customRole    Role?         @relation(fields: [roleId], references: [id], onDelete: SetNull)
+  sessions      Session[]
+  apiKeys       ApiKey[]
+  servers       Server[]      @relation("ServerOwner")
+  subusers      Subuser[]
+  activity      ActivityLog[]
+  recoveryCodes RecoveryCode[]
+  authTokens    AuthToken[]
+  notifications Notification[]
+  tickets       Ticket[]        @relation("TicketOwner")
+  assignedTickets Ticket[]      @relation("TicketAssignee")
+  ticketMessages TicketMessage[]
+
+  @@index([role])
+  @@index([planId])
+  @@index([roleId])
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// Roles / permissions (fully customizable RBAC)
+// ---------------------------------------------------------------------------
+
+/// A named permission bundle assignable to users. `permissions` is a JSON array
+/// of PERMISSIONS catalog keys (see src/lib/constants.ts). System roles
+/// (isSystem) are seeded and protected from destructive edits. When a user has
+/// a roleId this role is the source of truth for permission checks; otherwise
+/// the legacy User.role string + staffPermissions are used for back-compat.
+model Role {
+  id          Int      @id @default(autoincrement())
+  key         String   @unique // user | support | admin | custom-slug
+  name        String
+  description String?
+  permissions String   @default("[]") // JSON array of PERMISSIONS keys
+  isSystem    Boolean  @default(false)
+  isDefault   Boolean  @default(false) // assigned to new users by default
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  users User[]
+
+  @@map("roles")
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    Int
+  tokenHash String   @unique
+  ip        String?
+  userAgent String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  lastUsed  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("sessions")
+}
+
+model RecoveryCode {
+  id     Int     @id @default(autoincrement())
+  userId Int
+  code   String
+  used   Boolean @default(false)
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("recovery_codes")
+}
+
+model ApiKey {
+  id          Int       @id @default(autoincrement())
+  userId      Int
+  identifier  String    @unique
+  tokenHash   String
+  memo        String?
+  permissions String    @default("[]") // JSON array of scopes
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("api_keys")
+}
+
+// ---------------------------------------------------------------------------
+// Infrastructure: locations, nodes, allocations
+// ---------------------------------------------------------------------------
+
+model Location {
+  id        Int      @id @default(autoincrement())
+  shortCode String   @unique
+  name      String
+  createdAt DateTime @default(now())
+
+  nodes Node[]
+
+  @@map("locations")
+}
+
+model Node {
+  id                 Int      @id @default(autoincrement())
+  uuid               String   @unique
+  name               String
+  description        String?
+  locationId         Int?
+  public             Boolean  @default(true)
+  fqdn               String
+  scheme             String   @default("https") // http | https
+  behindProxy        Boolean  @default(false)
+  maintenanceMode    Boolean  @default(false)
+  // Resource pool (MiB / MiB / % cpu)
+  memory             Int      @default(8192)
+  memoryOverallocate Int      @default(0)
+  disk               Int      @default(51200)
+  diskOverallocate   Int      @default(0)
+  cpu                Int      @default(400)
+  cpuOverallocate    Int      @default(0)
+  uploadSize         Int      @default(256) // MiB
+  // Daemon (wings-like agent)
+  daemonBase         String   @default("/var/lib/spanel/volumes")
+  daemonListenHost   String   @default("") // Internal/NAT IP for panel→daemon; empty = use fqdn
+  daemonPort         Int      @default(8080)
+  daemonSftpPort     Int      @default(2022)
+  daemonTokenId      String   @unique
+  daemonToken        String // encrypted at rest
+  // Reverse proxy / webhost integration
+  proxyEnabled       Boolean  @default(true)
+  proxyHttpPort      Int      @default(80)
+  proxyHttpsPort     Int      @default(443)
+  // Liveness (populated by the daemon heartbeat, see /api/remote/nodes/heartbeat)
+  lastHeartbeatAt    DateTime?
+  heartbeatStatus    String   @default("unknown") // unknown | online | degraded | offline
+  heartbeatFailures  Int      @default(0)
+  daemonVersion      String?
+  systemOs           String?
+  systemArch         String?
+  systemKernel       String?
+  systemCpuModel     String?
+  systemCpuCores     Int?
+  systemMemoryTotal  Int? // MiB
+  systemDiskTotal    Int? // MiB
+  dockerVersion      String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  location    Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  allocations Allocation[]
+  servers     Server[]
+  domains     Domain[]
+  dbHosts     DatabaseHost[]
+  heartbeats  NodeHeartbeat[]
+  mounts      MountNode[]
+
+  @@index([locationId])
+  @@index([heartbeatStatus])
+  @@map("nodes")
+}
+
+/// Rolling time-series of daemon heartbeats. Trimmed to the newest samples by
+/// src/lib/services/heartbeat.ts so SQLite stays small.
+model NodeHeartbeat {
+  id             Int      @id @default(autoincrement())
+  nodeId         Int
+  memoryUsed     Int      @default(0) // MiB
+  memoryTotal    Int      @default(0) // MiB
+  diskUsed       Int      @default(0) // MiB
+  diskTotal      Int      @default(0) // MiB
+  cpuPercent     Float    @default(0)
+  loadAverage    Float    @default(0)
+  latencyMs      Int      @default(0)
+  runningServers Int      @default(0)
+  totalServers   Int      @default(0)
+  uptimeSeconds  Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  node Node @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@index([nodeId, createdAt])
+  @@map("node_heartbeats")
+}
+
+model Allocation {
+  id        Int      @id @default(autoincrement())
+  nodeId    Int
+  ip        String
+  ipAlias   String?
+  port      Int
+  notes     String?
+  serverId  Int?
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  node   Node    @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  server Server? @relation(fields: [serverId], references: [id], onDelete: SetNull)
+
+  @@unique([nodeId, ip, port])
+  @@index([serverId])
+  @@map("allocations")
+}
+
+// ---------------------------------------------------------------------------
+// Networking: domains + subdomains
+// ---------------------------------------------------------------------------
+
+model Domain {
+  id           Int      @id @default(autoincrement())
+  name         String   @unique // example.com
+  nodeId       Int?
+  isPublic     Boolean  @default(true) // usable for client subdomains
+  wildcardDns  Boolean  @default(false)
+  targetIp     String?
+  dnsProvider  String   @default("manual") // manual | cloudflare
+  dnsZoneId    String?
+  dnsApiToken  String? // encrypted
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  node       Node?        @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+  subdomains Subdomain[]
+  bindings   DomainBinding[]
+
+  @@index([nodeId])
+  @@map("domains")
+}
+
+model Subdomain {
+  id        Int      @id @default(autoincrement())
+  domainId  Int
+  label     String // "play" -> play.example.com
+  serverId  Int?
+  recordType String  @default("A") // A | CNAME | SRV
+  target    String? // resolved target (ip or hostname)
+  createdAt DateTime @default(now())
+
+  domain   Domain          @relation(fields: [domainId], references: [id], onDelete: Cascade)
+  server   Server?         @relation(fields: [serverId], references: [id], onDelete: SetNull)
+  bindings DomainBinding[]
+
+  @@unique([domainId, label])
+  @@index([serverId])
+  @@map("subdomains")
+}
+
+/// Attaches a hostname to a server so it can be reached without ip:port.
+model DomainBinding {
+  id          Int      @id @default(autoincrement())
+  serverId    Int
+  domainId    Int?
+  subdomainId Int?
+  hostname    String   @unique // fully-qualified hostname
+  kind        String   @default("http") // http | minecraft | tcp
+  httpsMode   String   @default("auto") // off | auto | manual
+  forceHttps  Boolean  @default(true)
+  targetPort  Int?
+  isPrimary   Boolean  @default(false)
+  status      String   @default("pending") // pending | active | error
+  statusNote  String?
+  certExpires DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  server    Server     @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  domain    Domain?    @relation(fields: [domainId], references: [id], onDelete: SetNull)
+  subdomain Subdomain? @relation(fields: [subdomainId], references: [id], onDelete: SetNull)
+
+  @@index([serverId])
+  @@map("domain_bindings")
+}
+
+// ---------------------------------------------------------------------------
+// Service catalogue: nests + eggs (service definitions)
+// ---------------------------------------------------------------------------
+
+model Nest {
+  id          Int      @id @default(autoincrement())
+  uuid        String   @unique
+  name        String
+  description String?
+  author      String   @default("spanel@sadlystudios.bond")
+  icon        String?
+  createdAt   DateTime @default(now())
+
+  eggs     Egg[]
+  packages Package[]
+
+  @@map("nests")
+}
+
+model Egg {
+  id              Int      @id @default(autoincrement())
+  uuid            String   @unique
+  nestId          Int
+  name            String
+  description     String?
+  kind            String   @default("game") // game | application | webhost
+  author          String   @default("spanel@sadlystudios.bond")
+  dockerImages    String   @default("{}") // JSON: { "label": "image" }
+  startup         String
+  configFiles     String   @default("{}")
+  configStartup   String   @default("{}")
+  configStop      String   @default("^C")
+  configLogs      String   @default("{}")
+  scriptContainer String   @default("ghcr.io/pterodactyl/installers:alpine")
+  scriptEntry     String   @default("ash")
+  scriptInstall   String   @default("")
+  features        String   @default("[]") // JSON array: eula, java_version, pid_limit, webhost...
+  fileDenylist    String   @default("[]")
+  forceOutgoingIp Boolean  @default(false)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  nest      Nest          @relation(fields: [nestId], references: [id], onDelete: Cascade)
+  variables EggVariable[]
+  servers   Server[]
+  packages  Package[]
+  mounts    MountEgg[]
+
+  @@index([nestId])
+  @@map("eggs")
+}
+
+model EggVariable {
+  id           Int     @id @default(autoincrement())
+  eggId        Int
+  name         String
+  description  String?
+  envVariable  String
+  defaultValue String  @default("")
+  userViewable Boolean @default(true)
+  userEditable Boolean @default(true)
+  rules        String  @default("nullable|string")
+  sortOrder    Int     @default(0)
+
+  egg      Egg             @relation(fields: [eggId], references: [id], onDelete: Cascade)
+  values   ServerVariable[]
+
+  @@unique([eggId, envVariable])
+  @@map("egg_variables")
+}
+
+// ---------------------------------------------------------------------------
+// Catalogue: plans (resource templates) + packages (sellable products)
+// ---------------------------------------------------------------------------
+
+/// A reusable resource-limit template. Its fields mirror the per-server limit
+/// columns on Server; picking a plan in the wizard copies these values across.
+model Plan {
+  id              Int      @id @default(autoincrement())
+  name            String
+  description     String?
+  isActive        Boolean  @default(true)
+  isPublic        Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  // Billing / subscription metadata.
+  priceCents      Int      @default(0)
+  currency        String   @default("USD")
+  billingCycle    String   @default("monthly") // monthly | yearly | once | free
+  // Resource limits (mirror Server) — MiB / MiB / % / weight.
+  memory          Int      @default(1024)
+  swap            Int      @default(0)
+  disk            Int      @default(5120)
+  io              Int      @default(500)
+  cpu             Int      @default(100)
+  threads         String?
+  oomKiller       Boolean  @default(false)
+  databaseLimit   Int      @default(2)
+  allocationLimit Int      @default(2)
+  backupLimit     Int      @default(3)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  packages           Package[]
+  requiredByPackages Package[]     @relation("PackageRequiredPlan")
+  servers            Server[]
+  users              User[]
+  availablePackages  PlanPackage[]
+
+  @@map("plans")
+}
+
+/// A sellable/selectable product bundling a Plan with a default Egg (and an
+/// optional Nest). Deleting the plan/egg/nest nulls the reference here.
+model Package {
+  id          Int      @id @default(autoincrement())
+  name        String
+  description String?
+  isPublic    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+  planId      Int?
+  // Optional convenience: the minimum plan a package needs. The PlanPackage
+  // join is the primary availability mechanism; this is a nullable shortcut.
+  requiredPlanId Int?
+  eggId       Int?
+  nestId      Int?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  plan         Plan?         @relation(fields: [planId], references: [id], onDelete: SetNull)
+  requiredPlan Plan?         @relation("PackageRequiredPlan", fields: [requiredPlanId], references: [id], onDelete: SetNull)
+  egg          Egg?          @relation(fields: [eggId], references: [id], onDelete: SetNull)
+  nest         Nest?         @relation(fields: [nestId], references: [id], onDelete: SetNull)
+  servers      Server[]
+  plans        PlanPackage[]
+
+  @@index([planId])
+  @@index([requiredPlanId])
+  @@index([eggId])
+  @@index([nestId])
+  @@map("packages")
+}
+
+/// Availability join: which packages a plan makes available. Distinct from
+/// Package.planId (which bundles resource limits). Deleting either side removes
+/// only the availability link.
+model PlanPackage {
+  id        Int      @id @default(autoincrement())
+  planId    Int
+  packageId Int
+  createdAt DateTime @default(now())
+
+  plan    Plan    @relation(fields: [planId], references: [id], onDelete: Cascade)
+  package Package @relation(fields: [packageId], references: [id], onDelete: Cascade)
+
+  @@unique([planId, packageId])
+  @@index([packageId])
+  @@map("plan_packages")
+}
+
+// ---------------------------------------------------------------------------
+// Servers
+// ---------------------------------------------------------------------------
+
+model Server {
+  id              Int      @id @default(autoincrement())
+  uuid            String   @unique
+  uuidShort       String   @unique
+  externalId      String?  @unique
+  name            String
+  description     String?
+  ownerId         Int
+  nodeId          Int
+  eggId           Int
+  // Optional catalogue references — a Plan/Package that seeded the limits below.
+  // SetNull so removing a plan/package never removes servers.
+  planId          Int?
+  packageId       Int?
+  // Resource limits
+  memory          Int      @default(1024) // MiB, 0 = unlimited
+  swap            Int      @default(0) // MiB, -1 = unlimited
+  disk            Int      @default(5120) // MiB
+  io              Int      @default(500) // 10-1000 block io weight
+  cpu             Int      @default(100) // percent, 0 = unlimited
+  threads         String? // pinned cores, e.g. "0-2,4"
+  oomKiller       Boolean  @default(false)
+  // Feature limits
+  databaseLimit   Int      @default(2)
+  allocationLimit Int      @default(2)
+  backupLimit     Int      @default(3)
+  // Runtime
+  image           String
+  startup         String
+  serviceKind     String   @default("game") // game | application | webhost
+  webRuntime      String? // html | php
+  phpVersion      String?
+  documentRoot    String   @default("/")
+  status          String   @default("installing") // installing | offline | starting | running | stopping | suspended | install_failed
+  installStatus   String   @default("pending") // pending | running | success | failed
+  suspended       Boolean  @default(false)
+  skipScripts     Boolean  @default(false)
+  installedAt     DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  owner       User             @relation("ServerOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+  node        Node             @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+  egg         Egg              @relation(fields: [eggId], references: [id])
+  plan        Plan?            @relation(fields: [planId], references: [id], onDelete: SetNull)
+  package     Package?         @relation(fields: [packageId], references: [id], onDelete: SetNull)
+  allocations Allocation[]
+  variables   ServerVariable[]
+  databases   ServerDatabase[]
+  backups     Backup[]
+  schedules   Schedule[]
+  subusers    Subuser[]
+  bindings    DomainBinding[]
+  subdomains  Subdomain[]
+  activity    ActivityLog[]
+  mounts      ServerMount[]
+
+  @@index([ownerId])
+  @@index([nodeId])
+  @@index([eggId])
+  @@index([planId])
+  @@index([packageId])
+  @@map("servers")
+}
+
+model ServerVariable {
+  id       Int    @id @default(autoincrement())
+  serverId Int
+  variableId Int
+  value    String
+
+  server   Server      @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  variable EggVariable @relation(fields: [variableId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, variableId])
+  @@map("server_variables")
+}
+
+model Subuser {
+  id          Int      @id @default(autoincrement())
+  serverId    Int
+  userId      Int
+  permissions String   @default("[]") // JSON array
+  createdAt   DateTime @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([serverId, userId])
+  @@map("subusers")
+}
+
+// ---------------------------------------------------------------------------
+// Databases
+// ---------------------------------------------------------------------------
+
+model DatabaseHost {
+  id            Int      @id @default(autoincrement())
+  name          String
+  host          String
+  port          Int      @default(3306)
+  username      String
+  password      String // encrypted
+  maxDatabases  Int      @default(0) // 0 = unlimited
+  phpMyAdminUrl String?
+  nodeId        Int?
+  // Health probe (see src/lib/services/db-health.ts)
+  lastCheckedAt DateTime?
+  reachable     Boolean?
+  serverVersion String?
+  statusNote    String?
+  latencyMs     Int?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  node      Node?            @relation(fields: [nodeId], references: [id], onDelete: SetNull)
+  databases ServerDatabase[]
+
+  @@unique([host, port])
+  @@map("database_hosts")
+}
+
+model ServerDatabase {
+  id             Int      @id @default(autoincrement())
+  serverId       Int
+  databaseHostId Int
+  database       String
+  username       String
+  password       String // encrypted
+  remote         String   @default("%")
+  maxConnections Int      @default(0)
+  createdAt      DateTime @default(now())
+
+  server Server       @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  host   DatabaseHost @relation(fields: [databaseHostId], references: [id], onDelete: Cascade)
+
+  @@unique([databaseHostId, database])
+  @@index([serverId])
+  @@map("server_databases")
+}
+
+// ---------------------------------------------------------------------------
+// Backups + schedules
+// ---------------------------------------------------------------------------
+
+model Backup {
+  id           Int       @id @default(autoincrement())
+  uuid         String    @unique
+  serverId     Int
+  name         String
+  ignoredFiles String    @default("[]")
+  disk         String    @default("local")
+  checksum     String?
+  bytes        Int       @default(0)
+  isSuccessful Boolean   @default(false)
+  isLocked     Boolean   @default(false)
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([serverId])
+  @@map("backups")
+}
+
+model Schedule {
+  id           Int       @id @default(autoincrement())
+  serverId     Int
+  name         String
+  cronMinute   String    @default("*/5")
+  cronHour     String    @default("*")
+  cronDayMonth String    @default("*")
+  cronMonth    String    @default("*")
+  cronDayWeek  String    @default("*")
+  isActive     Boolean   @default(true)
+  onlyWhenOnline Boolean @default(false)
+  lastRunAt    DateTime?
+  nextRunAt    DateTime?
+  createdAt    DateTime  @default(now())
+
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+  tasks  Task[]
+
+  @@index([serverId])
+  @@map("schedules")
+}
+
+model Task {
+  id            Int     @id @default(autoincrement())
+  scheduleId    Int
+  sequenceId    Int     @default(1)
+  action        String // command | power | backup
+  payload       String  @default("")
+  timeOffset    Int     @default(0)
+  continueOnFailure Boolean @default(false)
+
+  schedule Schedule @relation(fields: [scheduleId], references: [id], onDelete: Cascade)
+
+  @@index([scheduleId])
+  @@map("tasks")
+}
+
+// ---------------------------------------------------------------------------
+// Audit trail
+// ---------------------------------------------------------------------------
+
+model ActivityLog {
+  id         Int      @id @default(autoincrement())
+  userId     Int?
+  serverId   Int?
+  event      String
+  ip         String?
+  properties String   @default("{}")
+  createdAt  DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  server Server? @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([serverId])
+  @@index([event])
+  @@map("activity_logs")
+}
+
+// ---------------------------------------------------------------------------
+// Mounts: expose a host directory into a server's container
+// ---------------------------------------------------------------------------
+
+/// A reusable host→container bind an admin can attach to servers. Host paths
+/// are sensitive, so mounts are admin-defined only. The optional MountNode /
+/// MountEgg rows restrict which nodes/eggs a mount may be attached on; with no
+/// restriction rows a mount is allowed everywhere.
+model Mount {
+  id            Int      @id @default(autoincrement())
+  uuid          String   @unique
+  name          String
+  description   String?
+  source        String // host path on the node
+  target        String // path inside the container, e.g. /home/container/...
+  readOnly      Boolean  @default(true)
+  userMountable Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  nodes   MountNode[]
+  eggs    MountEgg[]
+  servers ServerMount[]
+
+  @@map("mounts")
+}
+
+/// Restricts a mount to a node. Absence of any row = allowed on all nodes.
+model MountNode {
+  id      Int @id @default(autoincrement())
+  mountId Int
+  nodeId  Int
+
+  mount Mount @relation(fields: [mountId], references: [id], onDelete: Cascade)
+  node  Node  @relation(fields: [nodeId], references: [id], onDelete: Cascade)
+
+  @@unique([mountId, nodeId])
+  @@index([nodeId])
+  @@map("mount_nodes")
+}
+
+/// Restricts a mount to an egg. Absence of any row = allowed on all eggs.
+model MountEgg {
+  id      Int @id @default(autoincrement())
+  mountId Int
+  eggId   Int
+
+  mount Mount @relation(fields: [mountId], references: [id], onDelete: Cascade)
+  egg   Egg   @relation(fields: [eggId], references: [id], onDelete: Cascade)
+
+  @@unique([mountId, eggId])
+  @@index([eggId])
+  @@map("mount_eggs")
+}
+
+/// Attaches a mount to a server. Deleting either side removes the link only.
+model ServerMount {
+  id       Int      @id @default(autoincrement())
+  mountId  Int
+  serverId Int
+  createdAt DateTime @default(now())
+
+  mount  Mount  @relation(fields: [mountId], references: [id], onDelete: Cascade)
+  server Server @relation(fields: [serverId], references: [id], onDelete: Cascade)
+
+  @@unique([mountId, serverId])
+  @@index([serverId])
+  @@map("server_mounts")
+}
+
+// ---------------------------------------------------------------------------
+// Auth lifecycle: email verification + password reset tokens
+// ---------------------------------------------------------------------------
+
+/// Single-use tokens for email verification and password reset flows. Only the
+/// hash is stored; the raw token is emailed to the user.
+model AuthToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  kind      String // email_verify | password_reset
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("auth_tokens")
+}
+
+// ---------------------------------------------------------------------------
+// Notifications
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  type      String
+  title     String
+  body      String    @default("")
+  url       String?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, readAt])
+  @@map("notifications")
+}
+
+// ---------------------------------------------------------------------------
+// Support: tickets, messages, attachments
+// ---------------------------------------------------------------------------
+
+model Ticket {
+  id           Int      @id @default(autoincrement())
+  uuid         String   @unique
+  userId       Int
+  subject      String
+  category     String   @default("general")
+  priority     String   @default("normal") // low | normal | high | urgent
+  status       String   @default("open") // open | pending | waiting_user | resolved | closed
+  assignedToId Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user       User            @relation("TicketOwner", fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo User?           @relation("TicketAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages   TicketMessage[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("tickets")
+}
+
+model TicketMessage {
+  id         Int      @id @default(autoincrement())
+  ticketId   Int
+  userId     Int?
+  body       String
+  isInternal Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  ticket      Ticket             @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user        User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  attachments TicketAttachment[]
+
+  @@index([ticketId])
+  @@map("ticket_messages")
+}
+
+model TicketAttachment {
+  id        Int      @id @default(autoincrement())
+  messageId Int
+  filename  String
+  path      String
+  bytes     Int      @default(0)
+  createdAt DateTime @default(now())
+
+  message TicketMessage @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@index([messageId])
+  @@map("ticket_attachments")
+}
+
+// ---------------------------------------------------------------------------
+// Status page: components + incidents
+// ---------------------------------------------------------------------------
+
+/// Optional manual components shown on the public status page.
+model StatusCategory {
+  id        Int      @id @default(autoincrement())
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  components StatusComponent[]
+
+  @@map("status_categories")
+}
+
+model StatusComponent {
+  id         Int  @id @default(autoincrement())
+  categoryId Int?
+  name       String
+  kind       String // panel | api | node | game | web | database
+  sortOrder  Int    @default(0)
+
+  // Real monitoring (additive). When monitorEnabled, a background worker probes
+  // monitorTarget every intervalSeconds and records StatusCheck rows. monitorType
+  // selects the probe: http (GET, ok on 2xx/3xx), tcp (connect to host:port), or
+  // ping (ICMP-less TCP-connect fallback / HEAD). visible hides an item from the
+  // public page without deleting its history.
+  monitorEnabled  Boolean @default(false)
+  monitorType     String  @default("http") // http | tcp | ping
+  monitorTarget   String  @default("") // url, or host:port for tcp
+  intervalSeconds Int     @default(60)
+  visible         Boolean @default(true)
+
+  // Denormalised latest state for cheap reads (recomputed by the worker).
+  lastStatus    String? // up | down | degraded
+  lastCheckedAt DateTime?
+  lastLatencyMs Int?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  category StatusCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  checks   StatusCheck[]
+  days     StatusDaily[]
+
+  @@index([categoryId])
+  @@map("status_components")
+}
+
+model StatusCheck {
+  id          Int      @id @default(autoincrement())
+  componentId Int
+  at          DateTime @default(now())
+  ok          Boolean
+  latencyMs   Int?
+  statusCode  Int?
+  error       String?
+
+  component StatusComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@index([componentId, at])
+  @@map("status_checks")
+}
+
+// Per-day rollup powering the 90-day uptime bars. A day is green when all
+// samples were ok, red when none were, and partial (yellow) when mixed.
+model StatusDaily {
+  id          Int      @id @default(autoincrement())
+  componentId Int
+  day         String // YYYY-MM-DD (UTC)
+  upSamples   Int      @default(0)
+  downSamples Int      @default(0)
+  updatedAt   DateTime @updatedAt
+
+  component StatusComponent @relation(fields: [componentId], references: [id], onDelete: Cascade)
+
+  @@unique([componentId, day])
+  @@index([componentId])
+  @@map("status_daily")
+}
+
+model Incident {
+  id         Int       @id @default(autoincrement())
+  uuid       String    @unique
+  title      String
+  impact     String    @default("minor") // minor | major | critical
+  status     String    @default("investigating") // investigating | identified | monitoring | resolved
+  startedAt  DateTime  @default(now())
+  resolvedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  updates IncidentUpdate[]
+
+  @@map("incidents")
+}
+
+model IncidentUpdate {
+  id         Int      @id @default(autoincrement())
+  incidentId Int
+  body       String
+  status     String
+  createdAt  DateTime @default(now())
+
+  incident Incident @relation(fields: [incidentId], references: [id], onDelete: Cascade)
+
+  @@index([incidentId])
+  @@map("incident_updates")
+}
