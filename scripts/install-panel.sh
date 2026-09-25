@@ -158,7 +158,7 @@ ok "Database ready."
 
 # ---- build -----------------------------------------------------------------
 log "Building the panel (this may take a minute)…"
-NODE_ENV=production npm run build --workspace @spanel/panel || \
+NODE_ENV=production npm run build --workspace @sadlystudios-panel/panel || \
   die "Panel build failed. Fix the error above and re-run."
 ok "Panel built successfully."
 

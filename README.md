@@ -411,8 +411,8 @@ npm test                   # both
 Against a running panel:
 
 ```bash
-npm run build --workspace @spanel/panel
-npm start --workspace @spanel/panel &
+npm run build --workspace @sadlystudios-panel/panel
+npm start --workspace @sadlystudios-panel/panel &
 
 npm run test:smoke  -- http://127.0.0.1:3110   # HTTP flow: registration, session, every page (30 checks)
 npm run test:remote -- http://127.0.0.1:3110   # daemon → panel remote API with real HMAC (11 checks)
@@ -487,7 +487,7 @@ apps/daemon/src/
   automatic record creation.
 - Node health is recomputed when `/admin` or `/admin/nodes` is rendered, and
   heartbeat samples are trimmed to the newest 240 per node (≈1 h at 15 s). The
-  optional background worker (`npm run worker --workspace @spanel/panel`) also
+  optional background worker (`npm run worker --workspace @sadlystudios-panel/panel`) also
   reconciles `heartbeatStatus` on every tick, so a node that stopped beating is
   flagged offline without waiting for an admin page load.
 - Signed requests cover the body only, with no timestamp or nonce, so an identical

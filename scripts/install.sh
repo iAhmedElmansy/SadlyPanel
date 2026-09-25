@@ -197,7 +197,7 @@ ENVEOF
 
   # build
   log "Building the panel…"
-  NODE_ENV=production npm run build --workspace @spanel/panel || \
+  NODE_ENV=production npm run build --workspace @sadlystudios-panel/panel || \
     die "Build failed."
   ok "Panel built."
 
@@ -370,7 +370,7 @@ install_daemon() {
   cd "$PANEL_DIR"
   log "Building the daemon…"
   npm install --no-audit --no-fund 2>/dev/null || npm install
-  npm run build --workspace @spanel/daemon || die "Daemon build failed."
+  npm run build --workspace @sadlystudios-daemon/daemon || die "Daemon build failed."
   ok "Daemon built."
 
   # fetch config from panel

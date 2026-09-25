@@ -14,7 +14,7 @@
  *
  * Run it alongside `next start`:
  *
- *   npm run worker --workspace @spanel/panel
+ *   npm run worker --workspace @sadlystudios-panel/panel
  *
  * Configure the cadence with SCHEDULER_INTERVAL_MS (default 30000).
  *

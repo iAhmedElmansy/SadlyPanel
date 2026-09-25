@@ -1,9 +1,9 @@
 {
-  "name": "@spanel/daemon",
-  "version": "1.0.0",
+  "name": "@sadlystudios-daemon/daemon",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "SPanel node daemon — container lifecycle, resource limits, console, files and reverse proxy",
+  "description": "SadlyStudios Panel node daemon — container lifecycle, resource limits, console, files and reverse proxy",
   "main": "dist/index.js",
   "bin": {
     "spanel-daemon": "dist/cli.js"

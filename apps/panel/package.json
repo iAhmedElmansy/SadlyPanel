@@ -1,6 +1,6 @@
 {
-  "name": "@spanel/panel",
-  "version": "1.0.0",
+  "name": "@sadlystudios-panel/panel",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3110",

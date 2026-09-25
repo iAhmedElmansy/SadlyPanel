@@ -317,14 +317,14 @@ do_update() {
     ok "Schema up to date."
 
     log "Building the panel… (this takes a few minutes)"
-    ( cd "$INSTALL_DIR" && NODE_ENV=production npm run build --workspace @spanel/panel ) || \
+    ( cd "$INSTALL_DIR" && NODE_ENV=production npm run build --workspace @sadlystudios-panel/panel ) || \
       die "Panel build failed."
     ok "Panel built."
   fi
 
   if $daemon_installed; then
     log "Building the daemon…"
-    ( cd "$INSTALL_DIR" && npm run build --workspace @spanel/daemon ) || \
+    ( cd "$INSTALL_DIR" && npm run build --workspace @sadlystudios-daemon/daemon ) || \
       die "Daemon build failed."
     ok "Daemon built."
   fi
