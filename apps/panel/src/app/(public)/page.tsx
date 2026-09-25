@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { redirect } from "next/navigation";
 import {
   ArrowRight,
   Gauge,
@@ -12,7 +11,7 @@ import {
   Terminal,
   Zap,
 } from "lucide-react";
-import { getCurrentUser, isFirstRun } from "@/lib/auth/session";
+import { getCurrentUser } from "@/lib/auth/session";
 import { getBranding } from "@/lib/settings";
 import { getAvailablePackagesForUser } from "@/lib/services/entitlements";
 import { prisma } from "@/lib/db";
@@ -55,7 +54,6 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 export default async function LandingPage() {
-  if (await isFirstRun()) redirect("/auth/register");
   const user = await getCurrentUser();
   const t = await getT();
 
