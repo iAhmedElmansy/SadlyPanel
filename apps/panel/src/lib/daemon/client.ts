@@ -150,6 +150,12 @@ export interface DaemonClientTarget {
   daemonPort: number;
   daemonTokenId: string;
   daemonToken: string;
+  /**
+   * True when a reverse proxy (e.g. nginx) terminates TLS on 443 in front of
+   * the daemon. When false and scheme is https, the daemon serves its own
+   * certificate directly on `daemonPort`.
+   */
+  behindProxy: boolean;
 }
 
 export function nodeTarget(node: Node): DaemonClientTarget {
@@ -161,6 +167,7 @@ export function nodeTarget(node: Node): DaemonClientTarget {
     daemonPort: node.daemonPort,
     daemonTokenId: node.daemonTokenId,
     daemonToken: decrypt(node.daemonToken),
+    behindProxy: Boolean((node as Record<string, unknown>).behindProxy),
   };
 }
 
@@ -174,16 +181,19 @@ export class DaemonClient {
   constructor(private readonly target: DaemonClientTarget) {
     // For server-side (panel→daemon) connections:
     // - If daemonListenHost is set, connect directly to it (internal/NAT IP) on the daemon port via HTTP.
-    // - If scheme is HTTPS and no listenHost override, nginx terminates TLS on 443;
+    // - If scheme is HTTPS and behindProxy, nginx terminates TLS on 443;
     //   connect via https://fqdn (port 443) so it goes through nginx.
-    // - Otherwise connect directly to fqdn:daemonPort.
+    // - If scheme is HTTPS and NOT behindProxy, the daemon terminates TLS itself
+    //   on its own port; connect via https://fqdn:daemonPort.
+    // - Otherwise connect directly to fqdn:daemonPort over HTTP.
     const connectHost = target.daemonListenHost || target.fqdn;
     if (target.daemonListenHost) {
       // Direct internal connection — always HTTP to the raw daemon port.
       this.base = `http://${connectHost}:${target.daemonPort}`;
     } else if (target.scheme === "https") {
-      // HTTPS via nginx on standard port 443.
-      this.base = `https://${connectHost}`;
+      this.base = target.behindProxy
+        ? `https://${connectHost}` // TLS terminated by nginx on standard port 443.
+        : `https://${connectHost}:${target.daemonPort}`; // daemon serves its own cert on its port.
     } else {
       this.base = `http://${connectHost}:${target.daemonPort}`;
     }
@@ -193,17 +203,20 @@ export class DaemonClient {
 
   /**
    * Public websocket URL used by the browser console — always uses the public FQDN.
-   * When scheme is HTTPS, uses wss:// on the standard port (443) because nginx
-   * terminates TLS and proxies to the daemon's internal port.
+   * When scheme is HTTPS and the node is behind a reverse proxy, uses wss:// on the
+   * standard port (443) because nginx terminates TLS and proxies to the daemon's
+   * internal port. When scheme is HTTPS and NOT behind a proxy, the daemon terminates
+   * TLS itself, so wss:// includes the daemon port.
    */
   websocketUrl(serverUuid: string): string {
-    const wsScheme = this.target.scheme === "https" ? "wss" : "ws";
-    // When using HTTPS, TLS is terminated by nginx on port 443, so omit the port.
-    // When using HTTP, include the daemon port explicitly.
+    const path = `/api/servers/${serverUuid}/ws`;
     if (this.target.scheme === "https") {
-      return `${wsScheme}://${this.target.fqdn}/api/servers/${serverUuid}/ws`;
+      // Behind nginx: TLS on 443, so omit the port. Direct daemon TLS: keep the port.
+      return this.target.behindProxy
+        ? `wss://${this.target.fqdn}${path}`
+        : `wss://${this.target.fqdn}:${this.target.daemonPort}${path}`;
     }
-    return `${wsScheme}://${this.target.fqdn}:${this.target.daemonPort}/api/servers/${serverUuid}/ws`;
+    return `ws://${this.target.fqdn}:${this.target.daemonPort}${path}`;
   }
 
   private sign(body: string): string {
