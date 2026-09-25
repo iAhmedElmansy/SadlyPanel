@@ -22,6 +22,7 @@ const en = {
   highlightControlTitle: "Real resource control",
   highlightControlBody: "Per-node capacity accounting, allocations, databases and live console access.",
   layoutTagline: "Hosting control plane",
+  layoutEyebrow: "The control plane",
   layoutHeadline: "Deploy, limit and reach your servers from one place.",
   layoutDescFallback: "Game, application and web hosting control panel.",
   layoutSecurityNote: "Sessions are signed, hashed and revocable at any time.",
@@ -30,6 +31,7 @@ const en = {
   metaSignIn: "Sign in",
 
   // login: two-factor step
+  eyebrowTwoFactor: "Verify identity",
   twoFactorTitle: "Two-factor authentication",
   twoFactorDesc: "Enter the 6-digit code from your authenticator app, or a recovery code.",
   authenticationCode: "Authentication code",
@@ -38,6 +40,7 @@ const en = {
   lostDevice: "Lost your device? Use one of your one-time recovery codes above.",
 
   // login: main form
+  eyebrowSignIn: "Secure access",
   signInTo: "Sign in to {name}",
   useUsernameOrEmail: "Use your username or email address.",
   usernameOrEmail: "Username or email",
@@ -67,6 +70,7 @@ const en = {
   goToSignIn: "Go to sign in",
 
   // register: form
+  eyebrowRegister: "Get started",
   firstRunSetup: "First run setup",
   createAdminAccount: "Create the administrator account",
   joinSite: "Join {name}",
@@ -146,6 +150,7 @@ const ar: Record<keyof typeof en, string> = {
   highlightControlTitle: "تحكم حقيقي بالموارد",
   highlightControlBody: "محاسبة سعة لكل عقدة، وتخصيصات، وقواعد بيانات، ووصول إلى وحدة تحكم فورية.",
   layoutTagline: "لوحة التحكم بالاستضافة",
+  layoutEyebrow: "منصة التحكم",
   layoutHeadline: "انشر خوادمك وحدّدها وتواصل معها من مكان واحد.",
   layoutDescFallback: "لوحة تحكم لاستضافة الألعاب والتطبيقات والمواقع.",
   layoutSecurityNote: "الجلسات موقّعة ومُجزّأة وقابلة للإبطال في أي وقت.",
@@ -154,6 +159,7 @@ const ar: Record<keyof typeof en, string> = {
   metaSignIn: "تسجيل الدخول",
 
   // login: two-factor step
+  eyebrowTwoFactor: "تأكيد الهوية",
   twoFactorTitle: "المصادقة الثنائية",
   twoFactorDesc: "أدخل الرمز المكوّن من 6 أرقام من تطبيق المصادقة، أو رمز استرداد.",
   authenticationCode: "رمز المصادقة",
@@ -162,6 +168,7 @@ const ar: Record<keyof typeof en, string> = {
   lostDevice: "فقدت جهازك؟ استخدم أحد رموز الاسترداد لمرة واحدة أعلاه.",
 
   // login: main form
+  eyebrowSignIn: "دخول آمن",
   signInTo: "تسجيل الدخول إلى {name}",
   useUsernameOrEmail: "استخدم اسم المستخدم أو البريد الإلكتروني.",
   usernameOrEmail: "اسم المستخدم أو البريد الإلكتروني",
@@ -191,6 +198,7 @@ const ar: Record<keyof typeof en, string> = {
   goToSignIn: "الذهاب إلى تسجيل الدخول",
 
   // register: form
+  eyebrowRegister: "لنبدأ",
   firstRunSetup: "إعداد التشغيل الأول",
   createAdminAccount: "إنشاء حساب المسؤول",
   joinSite: "انضم إلى {name}",

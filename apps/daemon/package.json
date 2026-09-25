@@ -1,6 +1,6 @@
 {
   "name": "@sadlystudios-daemon/daemon",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "private": true,
   "type": "module",
   "description": "SadlyStudios Panel node daemon — container lifecycle, resource limits, console, files and reverse proxy",

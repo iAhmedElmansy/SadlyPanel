@@ -197,6 +197,9 @@ ENVEOF
 
   # build
   log "Building the panel…"
+  # Drop any stale compiled output first — a leftover .next from an earlier
+  # (older) checkout is what makes a re-install keep serving the old pages.
+  rm -rf "$PANEL_DIR/apps/panel/.next"
   NODE_ENV=production npm run build --workspace @sadlystudios-panel/panel || \
     die "Build failed."
   ok "Panel built."

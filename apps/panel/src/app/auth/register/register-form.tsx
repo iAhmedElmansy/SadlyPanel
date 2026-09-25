@@ -32,7 +32,7 @@ export function RegisterForm({ firstRun, siteName }: { firstRun: boolean; siteNa
         <div className="mx-auto mb-4 grid size-11 place-items-center rounded-xl border border-ok/40 bg-ok/10 text-ok">
           <MailCheck className="size-5" />
         </div>
-        <h1 className="text-lg font-semibold text-ink">{t("auth.checkInbox")}</h1>
+        <h1 className="font-display text-xl font-semibold tracking-tight text-ink">{t("auth.checkInbox")}</h1>
         <p className="mx-auto mt-2 max-w-sm text-sm text-ink-muted">{state.success}</p>
         <Link href="/auth/login" className="btn btn-primary mx-auto mt-6">
           {t("auth.goToSignIn")}
@@ -43,19 +43,26 @@ export function RegisterForm({ firstRun, siteName }: { firstRun: boolean; siteNa
 
   return (
     <div className="panel-card animate-in p-6 sm:p-8">
-      <div className="mb-6 space-y-2">
+      <div className="mb-6 space-y-3">
         {firstRun ? (
           <span className="badge border-brand/40 bg-brand/12 text-brand-soft">
             <ShieldCheck className="size-3" />
             {t("auth.firstRunSetup")}
           </span>
-        ) : null}
-        <h1 className="text-xl font-semibold text-ink">
-          {firstRun ? t("auth.createAdminAccount") : t("auth.joinSite", { name: siteName })}
-        </h1>
-        <p className="text-sm text-ink-muted">
-          {firstRun ? t("auth.createAdminDesc") : t("auth.createAccountDesc")}
-        </p>
+        ) : (
+          <span className="inline-flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.2em] text-ink-dim">
+            <span aria-hidden className="h-px w-6 rounded-full bg-brand/40" />
+            {t("auth.eyebrowRegister")}
+          </span>
+        )}
+        <div className="space-y-1.5">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">
+            {firstRun ? t("auth.createAdminAccount") : t("auth.joinSite", { name: siteName })}
+          </h1>
+          <p className="text-sm text-ink-muted">
+            {firstRun ? t("auth.createAdminDesc") : t("auth.createAccountDesc")}
+          </p>
+        </div>
       </div>
 
       <form action={action} className="space-y-4" noValidate>

@@ -41,7 +41,11 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
 
         <div className="relative max-w-md space-y-8">
           <div className="space-y-3">
-            <h1 className="text-3xl font-semibold leading-tight text-ink">
+            <span className="inline-flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.2em] text-ink-dim">
+              <span aria-hidden className="h-px w-6 rounded-full bg-brand/40" />
+              {t("auth.layoutEyebrow")}
+            </span>
+            <h1 className="font-display text-3xl font-semibold leading-tight tracking-tight text-ink">
               {t("auth.layoutHeadline")}
             </h1>
             <p className="text-sm leading-relaxed text-ink-muted">

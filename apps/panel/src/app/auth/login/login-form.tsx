@@ -26,9 +26,15 @@ export function LoginForm({
   if (state.twoFactor) {
     return (
       <div className="panel-card animate-in p-6 sm:p-8">
-        <div className="mb-6 space-y-1.5">
-          <h1 className="text-xl font-semibold text-ink">{t("auth.twoFactorTitle")}</h1>
-          <p className="text-sm text-ink-muted">{t("auth.twoFactorDesc")}</p>
+        <div className="mb-6 space-y-3">
+          <span className="inline-flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.2em] text-ink-dim">
+            <span aria-hidden className="h-px w-6 rounded-full bg-brand/40" />
+            {t("auth.eyebrowTwoFactor")}
+          </span>
+          <div className="space-y-1.5">
+            <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">{t("auth.twoFactorTitle")}</h1>
+            <p className="text-sm text-ink-muted">{t("auth.twoFactorDesc")}</p>
+          </div>
         </div>
 
         <form action={action} className="space-y-4" noValidate>
@@ -63,9 +69,15 @@ export function LoginForm({
 
   return (
     <div className="panel-card animate-in p-6 sm:p-8">
-      <div className="mb-6 space-y-1.5">
-        <h1 className="text-xl font-semibold text-ink">{t("auth.signInTo", { name: siteName })}</h1>
-        <p className="text-sm text-ink-muted">{t("auth.useUsernameOrEmail")}</p>
+      <div className="mb-6 space-y-3">
+        <span className="inline-flex items-center gap-2 font-mono text-[0.6875rem] font-medium uppercase tracking-[0.2em] text-ink-dim">
+          <span aria-hidden className="h-px w-6 rounded-full bg-brand/40" />
+          {t("auth.eyebrowSignIn")}
+        </span>
+        <div className="space-y-1.5">
+          <h1 className="font-display text-2xl font-semibold tracking-tight text-ink">{t("auth.signInTo", { name: siteName })}</h1>
+          <p className="text-sm text-ink-muted">{t("auth.useUsernameOrEmail")}</p>
+        </div>
       </div>
 
       <form action={action} className="space-y-4" noValidate>

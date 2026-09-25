@@ -11,11 +11,13 @@
 #  scripts/install.sh which does the actual Panel / Daemon setup.
 #
 #  Non-interactive:
-#      bash installer.sh --panel      # install the web panel
-#      bash installer.sh --daemon     # install a node daemon
-#      bash installer.sh --both       # both on one machine
-#      bash installer.sh --update     # update an existing install
-#      bash installer.sh --uninstall  # remove services
+#      bash installer.sh --panel          # install the web panel
+#      bash installer.sh --daemon         # install a node daemon
+#      bash installer.sh --both           # both on one machine
+#      bash installer.sh --update         # update everything installed here
+#      bash installer.sh --update-panel   # update only the panel
+#      bash installer.sh --update-daemon  # update only the daemon
+#      bash installer.sh --uninstall      # remove services
 #
 #  Overridable with environment variables:
 #      SPANEL_REPO    git url          (default: this repository)
@@ -29,7 +31,7 @@ set -euo pipefail
 REPO_URL="${SPANEL_REPO:-https://github.com/iAhmedElmansy/SadlyPanel.git}"
 REPO_BRANCH="${SPANEL_BRANCH:-main}"
 INSTALL_DIR="${SPANEL_DIR:-/var/www/SPanel}"
-INSTALLER_VERSION="1.0.0"
+INSTALLER_VERSION="1.1.0"
 
 # ---- colours + output -----------------------------------------------------
 if [[ -t 1 ]]; then
@@ -263,13 +265,15 @@ install_wrapper() {
 # SPanel management shortcut — installed by installer.sh
 SPANEL_DIR="${INSTALL_DIR}"
 case "\${1:-menu}" in
-  menu|"")   exec bash "\${SPANEL_DIR}/installer.sh" ;;
-  update)    exec bash "\${SPANEL_DIR}/installer.sh" --update ;;
-  uninstall) exec bash "\${SPANEL_DIR}/installer.sh" --uninstall ;;
-  status)    systemctl status spanel-panel spanel-daemon --no-pager ;;
-  restart)   systemctl restart spanel-panel 2>/dev/null; systemctl restart spanel-daemon 2>/dev/null; echo "restarted" ;;
-  logs)      journalctl -u "spanel-\${2:-panel}" -f ;;
-  *)         echo "usage: spanel [menu|update|uninstall|status|restart|logs <panel|daemon>]" ;;
+  menu|"")      exec bash "\${SPANEL_DIR}/installer.sh" ;;
+  update)       exec bash "\${SPANEL_DIR}/installer.sh" --update ;;
+  update-panel) exec bash "\${SPANEL_DIR}/installer.sh" --update-panel ;;
+  update-daemon)exec bash "\${SPANEL_DIR}/installer.sh" --update-daemon ;;
+  uninstall)    exec bash "\${SPANEL_DIR}/installer.sh" --uninstall ;;
+  status)       systemctl status spanel-panel spanel-daemon --no-pager ;;
+  restart)      systemctl restart spanel-panel 2>/dev/null; systemctl restart spanel-daemon 2>/dev/null; echo "restarted" ;;
+  logs)         journalctl -u "spanel-\${2:-panel}" -f ;;
+  *)            echo "usage: spanel [menu|update|update-panel|update-daemon|uninstall|status|restart|logs <panel|daemon>]" ;;
 esac
 WRAPEOF
   chmod +x /usr/local/bin/spanel
@@ -291,6 +295,54 @@ hand_off() {
     bash "$INSTALL_DIR/scripts/install.sh"
 }
 
+# Shared update plumbing. prepare_source runs at most once per invocation even
+# when both the panel and the daemon are being rebuilt, guarded by
+# SOURCE_PREPARED so a "both" update doesn't fetch and npm-install twice.
+SOURCE_PREPARED=false
+
+prepare_source() {
+  if $SOURCE_PREPARED; then return; fi
+  fetch_source
+  log "Installing dependencies…"
+  ( cd "$INSTALL_DIR" && npm install --no-audit --no-fund ) || die "npm install failed."
+  ok "Dependencies installed."
+  SOURCE_PREPARED=true
+}
+
+rebuild_panel() {
+  log "Applying database schema…"
+  ( cd "$INSTALL_DIR" && npx prisma db push \
+      --schema apps/panel/prisma/schema.prisma --accept-data-loss ) || \
+    die "prisma db push failed."
+  ok "Schema up to date."
+
+  # Wipe the compiled output before rebuilding. A stale .next is exactly what
+  # makes an updated checkout keep serving the *old* pages after a git pull —
+  # the root cause of "it installed an old version".
+  rm -rf "$INSTALL_DIR/apps/panel/.next"
+
+  log "Building the panel… (this takes a few minutes)"
+  ( cd "$INSTALL_DIR" && NODE_ENV=production npm run build --workspace @sadlystudios-panel/panel ) || \
+    die "Panel build failed."
+  ok "Panel built."
+}
+
+rebuild_daemon() {
+  log "Building the daemon…"
+  ( cd "$INSTALL_DIR" && npm run build --workspace @sadlystudios-daemon/daemon ) || \
+    die "Daemon build failed."
+  ok "Daemon built."
+}
+
+restart_service() {
+  local svc="$1"
+  if systemctl restart "spanel-$svc"; then
+    ok "spanel-$svc restarted."
+  else
+    warn "spanel-$svc failed to restart — journalctl -u spanel-$svc -n 40"
+  fi
+}
+
 do_update() {
   [[ -d "$INSTALL_DIR/.git" ]] || \
     die "No SPanel checkout at $INSTALL_DIR. Install it first."
@@ -303,57 +355,73 @@ do_update() {
   if [[ -f /etc/systemd/system/spanel-panel.service ]]; then panel_installed=true; fi
   if [[ -f /etc/systemd/system/spanel-daemon.service ]]; then daemon_installed=true; fi
 
-  fetch_source
-
-  log "Installing dependencies…"
-  ( cd "$INSTALL_DIR" && npm install --no-audit --no-fund ) || die "npm install failed."
-  ok "Dependencies installed."
-
-  if $panel_installed; then
-    log "Applying database schema…"
-    ( cd "$INSTALL_DIR" && npx prisma db push \
-        --schema apps/panel/prisma/schema.prisma --accept-data-loss ) || \
-      die "prisma db push failed."
-    ok "Schema up to date."
-
-    log "Building the panel… (this takes a few minutes)"
-    ( cd "$INSTALL_DIR" && NODE_ENV=production npm run build --workspace @sadlystudios-panel/panel ) || \
-      die "Panel build failed."
-    ok "Panel built."
+  if ! $panel_installed && ! $daemon_installed; then
+    die "No SPanel services are installed on this machine — nothing to update.
+      Install the Panel or a Daemon first (spanel menu)."
   fi
 
-  if $daemon_installed; then
-    log "Building the daemon…"
-    ( cd "$INSTALL_DIR" && npm run build --workspace @sadlystudios-daemon/daemon ) || \
-      die "Daemon build failed."
-    ok "Daemon built."
-  fi
+  prepare_source
+
+  if $panel_installed; then rebuild_panel; fi
+  if $daemon_installed; then rebuild_daemon; fi
 
   install_wrapper
 
   echo ""
   log "Restarting services…"
-  if $panel_installed; then
-    if systemctl restart spanel-panel; then
-      ok "spanel-panel restarted."
-    else
-      warn "spanel-panel failed to restart — journalctl -u spanel-panel -n 40"
-    fi
-  fi
-  if $daemon_installed; then
-    if systemctl restart spanel-daemon; then
-      ok "spanel-daemon restarted."
-    else
-      warn "spanel-daemon failed to restart — journalctl -u spanel-daemon -n 40"
-    fi
-  fi
-
-  if ! $panel_installed && ! $daemon_installed; then
-    warn "No SPanel services are installed on this machine, so nothing was restarted."
-  fi
+  if $panel_installed; then restart_service panel; fi
+  if $daemon_installed; then restart_service daemon; fi
 
   echo ""
   ok "Update complete."
+  echo ""
+}
+
+do_update_panel() {
+  [[ -d "$INSTALL_DIR/.git" ]] || \
+    die "No SPanel checkout at $INSTALL_DIR. Install it first."
+  [[ -f /etc/systemd/system/spanel-panel.service ]] || \
+    die "The Panel is not installed on this machine — nothing to update.
+      Install it first (spanel menu)."
+
+  banner
+  log "Updating the Panel at $INSTALL_DIR"
+  echo ""
+
+  prepare_source
+  rebuild_panel
+  install_wrapper
+
+  echo ""
+  log "Restarting the panel…"
+  restart_service panel
+
+  echo ""
+  ok "Panel update complete."
+  echo ""
+}
+
+do_update_daemon() {
+  [[ -d "$INSTALL_DIR/.git" ]] || \
+    die "No SPanel checkout at $INSTALL_DIR. Install it first."
+  [[ -f /etc/systemd/system/spanel-daemon.service ]] || \
+    die "The Daemon is not installed on this machine — nothing to update.
+      Install it first (spanel menu)."
+
+  banner
+  log "Updating the Daemon at $INSTALL_DIR"
+  echo ""
+
+  prepare_source
+  rebuild_daemon
+  install_wrapper
+
+  echo ""
+  log "Restarting the daemon…"
+  restart_service daemon
+
+  echo ""
+  ok "Daemon update complete."
   echo ""
 }
 
@@ -387,9 +455,11 @@ main_menu() {
   echo -e "    ${C_GREEN}1)${C_RESET} Install the Panel        ${C_DIM}the web interface your users log into${C_RESET}"
   echo -e "    ${C_GREEN}2)${C_RESET} Install a Daemon (node)  ${C_DIM}the machine that actually runs servers${C_RESET}"
   echo -e "    ${C_GREEN}3)${C_RESET} Install both             ${C_DIM}everything on this one machine${C_RESET}"
-  echo -e "    ${C_GREEN}4)${C_RESET} Update SPanel            ${C_DIM}pull the latest version and rebuild${C_RESET}"
-  echo -e "    ${C_GREEN}5)${C_RESET} Uninstall                ${C_DIM}remove services, keep your data${C_RESET}"
-  echo -e "    ${C_GREEN}6)${C_RESET} Exit"
+  echo -e "    ${C_GREEN}4)${C_RESET} Update the Panel         ${C_DIM}rebuild just the web interface${C_RESET}"
+  echo -e "    ${C_GREEN}5)${C_RESET} Update the Daemon        ${C_DIM}rebuild just the node daemon${C_RESET}"
+  echo -e "    ${C_GREEN}6)${C_RESET} Update everything        ${C_DIM}pull the latest and rebuild all${C_RESET}"
+  echo -e "    ${C_GREEN}7)${C_RESET} Uninstall                ${C_DIM}remove services, keep your data${C_RESET}"
+  echo -e "    ${C_GREEN}8)${C_RESET} Exit"
   echo ""
 
   local choice
@@ -400,10 +470,12 @@ main_menu() {
     1) run_action panel ;;
     2) run_action daemon ;;
     3) run_action both ;;
-    4) run_action update ;;
-    5) run_action uninstall ;;
-    6) echo ""; log "Goodbye!"; exit 0 ;;
-    *) warn "Pick a number from 1 to 6."; sleep 1; main_menu ;;
+    4) run_action update-panel ;;
+    5) run_action update-daemon ;;
+    6) run_action update ;;
+    7) run_action uninstall ;;
+    8) echo ""; log "Goodbye!"; exit 0 ;;
+    *) warn "Pick a number from 1 to 8."; sleep 1; main_menu ;;
   esac
 }
 
@@ -411,11 +483,15 @@ run_action() {
   local action="$1"
 
   case "$action" in
-    update)
+    update|update-panel|update-daemon)
       preflight
       ensure_base_packages
       ensure_node
-      do_update
+      case "$action" in
+        update)        do_update ;;
+        update-panel)  do_update_panel ;;
+        update-daemon) do_update_daemon ;;
+      esac
       ;;
     uninstall)
       [[ $EUID -eq 0 ]] || die "Run this as root (use sudo)."
