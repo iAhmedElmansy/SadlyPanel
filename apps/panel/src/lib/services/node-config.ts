@@ -143,6 +143,26 @@ export function renderConfigureCommand(node: Node, options: DaemonConfigOptions)
   return `sudo spanel-daemon configure --panel ${options.panelUrl} --token-id ${node.daemonTokenId} --token ${options.token}`;
 }
 
+/**
+ * "Set configuration" one-shot for a node whose daemon binary is already
+ * installed (by installer.sh / scripts/install.sh). It only *writes this node's
+ * configuration on the machine*: it renders `/etc/spanel/config.yml` verbatim
+ * from the values the panel injects — panel URL, token pair, listen host/port
+ * and TLS — using a single-quoted heredoc so nothing in the body is
+ * shell-expanded, then reloads systemd and restarts the `spanel-daemon` unit.
+ * It does NOT download, build or bootstrap the daemon, Docker, the spanel user
+ * or any directories. On success the console prints "configuration set
+ * successfully".
+ */
+export function renderSetConfigCommand(node: Node, options: DaemonConfigOptions): string {
+  const config = renderDaemonConfig(node, options);
+  // `config` already ends with a newline, so the heredoc terminator lands on
+  // its own line directly after it.
+  return `sudo mkdir -p /etc/spanel && sudo tee /etc/spanel/config.yml > /dev/null <<'SPANEL_CONFIG'
+${config}SPANEL_CONFIG
+sudo chmod 640 /etc/spanel/config.yml && sudo systemctl daemon-reload && sudo systemctl restart spanel-daemon && echo "configuration set successfully"`;
+}
+
 /** systemd service-control commands for the node operator (fixed service name). */
 export interface ServiceCommands {
   enable: string;

@@ -1,17 +1,30 @@
+import { Suspense } from "react";
 import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { getNodeCapacity } from "@/lib/services/capacity";
 import { healthOf, nodeHealthSummary, refreshNodeHealth } from "@/lib/services/heartbeat";
 import { PageHeader, StatCard } from "@/components/layout/page-header";
 import { NodeList, type NodeRow } from "./node-list";
+import { PanelVersionBadge } from "./update-panel";
+import { daemonPackageVersion, daemonUpdateTarget } from "./node-versions";
 import { getT } from "@/lib/i18n/server";
-import { panelVersion } from "@/lib/version";
+import { panelVersion, checkForUpdates } from "@/lib/version";
 
 export async function generateMetadata() {
   const t = await getT();
   return { title: t("admin.nodesMeta") };
 }
 export const dynamic = "force-dynamic";
+
+/**
+ * Git-based panel update status, streamed into the header. `checkForUpdates()`
+ * runs a `git fetch` (up to a 10s timeout), so it renders inside <Suspense> and
+ * the page paints immediately with just the version chip as the fallback.
+ */
+async function PanelUpdateBadge() {
+  const status = await checkForUpdates();
+  return <PanelVersionBadge status={status} panelVersion={panelVersion()} />;
+}
 
 export default async function AdminNodesPage() {
   await requirePermission("nodes.view");
@@ -20,6 +33,9 @@ export default async function AdminNodesPage() {
   // Reconcile heartbeatStatus with the clock so a node that stopped beating is
   // not reported as online for ever.
   await refreshNodeHealth().catch(() => undefined);
+
+  // The daemon build this panel ships — nodes running an older daemon are behind.
+  const latestDaemon = daemonPackageVersion();
 
   const [nodeRows, locations, plans, health] = await Promise.all([
     prisma.node.findMany({ include: { location: true }, orderBy: { name: "asc" } }),
@@ -54,6 +70,7 @@ export default async function AdminNodesPage() {
         health: healthOf(node.lastHeartbeatAt),
         lastHeartbeatAt: node.lastHeartbeatAt?.toISOString() ?? null,
         daemonVersion: node.daemonVersion,
+        daemonUpdateTo: daemonUpdateTarget(node.daemonVersion, latestDaemon),
         live: beat
           ? {
               cpuPercent: beat.cpuPercent,
@@ -75,11 +92,25 @@ export default async function AdminNodesPage() {
         title={t("admin.nodesTitle")}
         description={t("admin.nodesDesc")}
         actions={
-          <span
-            className="badge border-line bg-surface-2 font-mono text-[11px] text-ink-muted"
-            title="Panel version"
-          >
-            v{panelVersion()}
+          <span className="flex flex-wrap items-center gap-2">
+            <Suspense
+              fallback={
+                <span
+                  className="badge border-line bg-surface-2 font-mono text-[11px] text-ink-muted"
+                  title={t("admin.updPanelChipTitle")}
+                >
+                  v{panelVersion()}
+                </span>
+              }
+            >
+              <PanelUpdateBadge />
+            </Suspense>
+            <span
+              className="badge border-line bg-surface-2 font-mono text-[11px] text-ink-muted"
+              title={t("admin.updDaemonChipTitle")}
+            >
+              {t("admin.updDaemonChip", { version: latestDaemon })}
+            </span>
           </span>
         }
       />

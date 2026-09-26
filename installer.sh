@@ -31,7 +31,7 @@ set -euo pipefail
 REPO_URL="${SPANEL_REPO:-https://github.com/iAhmedElmansy/SadlyPanel.git}"
 REPO_BRANCH="${SPANEL_BRANCH:-main}"
 INSTALL_DIR="${SPANEL_DIR:-/var/www/SPanel}"
-INSTALLER_VERSION="1.1.2"
+INSTALLER_VERSION="1.2.0"
 
 # ---- colours + output -----------------------------------------------------
 if [[ -t 1 ]]; then
@@ -332,11 +332,13 @@ source_changed() {
   [[ "$CHANGED_FILES" == "__ALL__" ]] && return 0
   [[ -n "$CHANGED_FILES" ]] && grep -q "^$1" <<<"$CHANGED_FILES"
 }
-# true when dependencies changed (any package.json or the lockfile) — a rebuild
-# of both components is then warranted even if only shared deps moved.
+# true when the *shared root* dependencies changed (the root package.json or the
+# repo-wide package-lock.json) — a rebuild of both components is then warranted.
+# Per-workspace package.json edits are caught by source_changed "apps/<svc>/"
+# instead, so a panel-only metadata change never forces a daemon rebuild.
 source_changed_deps() {
   [[ "$CHANGED_FILES" == "__ALL__" ]] && return 0
-  [[ -n "$CHANGED_FILES" ]] && grep -qE '(^|/)package(-lock)?\.json$' <<<"$CHANGED_FILES"
+  [[ -n "$CHANGED_FILES" ]] && grep -qE '^package(-lock)?\.json$' <<<"$CHANGED_FILES"
 }
 # true when the update changed nothing at all.
 update_is_noop() {
@@ -458,15 +460,9 @@ do_update_panel() {
   log "Updating the Panel at $INSTALL_DIR"
   echo ""
 
+  # Explicit single-service update: always rebuild + restart, even when the
+  # fetch changed nothing under apps/panel/ — an explicit request is a force.
   prepare_source
-
-  if ! source_changed "apps/panel/" && ! source_changed_deps; then
-    install_wrapper
-    echo ""
-    ok "Panel already up to date ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)); nothing to rebuild."
-    echo ""
-    return
-  fi
 
   rebuild_panel
   install_wrapper
@@ -491,15 +487,9 @@ do_update_daemon() {
   log "Updating the Daemon at $INSTALL_DIR"
   echo ""
 
+  # Explicit single-service update: always rebuild + restart, even when the
+  # fetch changed nothing under apps/daemon/ — an explicit request is a force.
   prepare_source
-
-  if ! source_changed "apps/daemon/" && ! source_changed_deps; then
-    install_wrapper
-    echo ""
-    ok "Daemon already up to date ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)); nothing to rebuild."
-    echo ""
-    return
-  fi
 
   rebuild_daemon
   install_wrapper

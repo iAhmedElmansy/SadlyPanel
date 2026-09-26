@@ -193,3 +193,80 @@ export async function assertUserCanUseNode(user: EntitlementUser, nodeId: number
       : "This node is not available on your current plan.",
   };
 }
+
+// ---------------------------------------------------------------------------
+// Plan quota (aggregate resource allowance across a user's servers)
+//
+// A user's plan grants a POOL of memory / disk / cpu shared across every server
+// they own; each new self-service server draws from what's left after their
+// existing servers. A plan dimension of 0 means "unlimited" (no cap), mirroring
+// the Server semantics where 0 = unlimited. Ports and databases are per-server
+// feature caps (plan.allocationLimit / plan.databaseLimit), not pooled, and are
+// enforced at the server level rather than here.
+// ---------------------------------------------------------------------------
+
+export type QuotaDimension = "memory" | "disk" | "cpu";
+
+export interface PlanQuota {
+  plan: Plan;
+  /** Aggregate usage across the user's existing servers (MiB / MiB / % cpu). */
+  used: { memory: number; disk: number; cpu: number };
+  /** Remaining allowance per dimension. Number.POSITIVE_INFINITY when unlimited. */
+  remaining: { memory: number; disk: number; cpu: number };
+  /** True when the plan sets the dimension to 0 (uncapped). */
+  unlimited: { memory: boolean; disk: boolean; cpu: boolean };
+  /** How many servers the user already owns. */
+  serverCount: number;
+}
+
+/**
+ * Resolves the user's plan plus how much of its pooled RAM / disk / CPU their
+ * existing servers already consume, and what remains. Returns null when the
+ * user has no plan assigned (self-service is blocked in that case).
+ */
+export async function getUserPlanQuota(userId: number): Promise<PlanQuota | null> {
+  const plan = await getUserPlan(userId);
+  if (!plan) return null;
+
+  const [aggregate, serverCount] = await Promise.all([
+    prisma.server.aggregate({ where: { ownerId: userId }, _sum: { memory: true, disk: true, cpu: true } }),
+    prisma.server.count({ where: { ownerId: userId } }),
+  ]);
+
+  const used = {
+    memory: aggregate._sum.memory ?? 0,
+    disk: aggregate._sum.disk ?? 0,
+    cpu: aggregate._sum.cpu ?? 0,
+  };
+
+  const left = (total: number, consumed: number) =>
+    total <= 0 ? Number.POSITIVE_INFINITY : Math.max(0, total - consumed);
+
+  return {
+    plan,
+    used,
+    remaining: {
+      memory: left(plan.memory, used.memory),
+      disk: left(plan.disk, used.disk),
+      cpu: left(plan.cpu, used.cpu),
+    },
+    unlimited: { memory: plan.memory <= 0, disk: plan.disk <= 0, cpu: plan.cpu <= 0 },
+    serverCount,
+  };
+}
+
+/**
+ * Pure check: returns the first dimension whose requested amount exceeds the
+ * plan's remaining allowance, or null when the whole request fits. Unlimited
+ * dimensions never fail. Used by the create action to reject over-quota
+ * requests without trusting the clamped client values.
+ */
+export function quotaExceededDimension(
+  quota: Pick<PlanQuota, "remaining" | "unlimited">,
+  req: { memory: number; disk: number; cpu: number },
+): QuotaDimension | null {
+  if (!quota.unlimited.memory && req.memory > quota.remaining.memory) return "memory";
+  if (!quota.unlimited.disk && req.disk > quota.remaining.disk) return "disk";
+  if (!quota.unlimited.cpu && req.cpu > quota.remaining.cpu) return "cpu";
+  return null;
+}

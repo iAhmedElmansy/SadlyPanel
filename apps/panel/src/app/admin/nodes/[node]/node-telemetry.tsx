@@ -125,7 +125,7 @@ export function NodeTelemetry({
           description={t("admin.telHealthDesc")}
           action={
             <span className="flex items-center gap-2">
-              <HealthHeart health={health} title={heartTitle(health, daemonVersion)} size="size-5" />
+              <HealthHeart health={health} title={heartTitle(health, daemonVersion, t)} size="size-5" />
               <span className="text-xs text-ink-dim">{relativeTime(lastHeartbeatAt)}</span>
             </span>
           }

@@ -327,13 +327,24 @@ install_daemon() {
   [[ -n "$TOKEN" ]] || die "Token is required."
   local DAEMON_PORT=$(ask "Daemon port" "8282")
 
+  # Whether the daemon itself terminates TLS (serves HTTPS directly on its own
+  # port). This is separate from the nginx/Let's Encrypt reverse proxy above and
+  # only affects the *fallback* config written below — when the panel provides a
+  # config, the daemon's SSL comes from the Node record instead. Defaults to No:
+  # most nodes stay plain HTTP on a private network or sit behind the proxy.
+  local DAEMON_TLS=false
+  if ask_yn "Enable SSL/TLS directly on the daemon (serve HTTPS on its own port)?" "n"; then
+    DAEMON_TLS=true
+  fi
+
   local DAEMON_SCHEME="http"
   [[ "$DAEMON_USE_SSL" == true ]] && DAEMON_SCHEME="https"
 
   echo ""
   echo -e "  ${C_DIM}Panel URL:${C_RESET}     $PANEL_URL"
   echo -e "  ${C_DIM}Daemon FQDN:${C_RESET}   $DAEMON_FQDN"
-  echo -e "  ${C_DIM}Daemon HTTPS:${C_RESET}  $DAEMON_USE_SSL"
+  echo -e "  ${C_DIM}Daemon HTTPS:${C_RESET}  $DAEMON_USE_SSL  ${C_DIM}(nginx/Let's Encrypt proxy)${C_RESET}"
+  echo -e "  ${C_DIM}Daemon TLS:${C_RESET}    $DAEMON_TLS  ${C_DIM}(daemon serves HTTPS itself)${C_RESET}"
   echo -e "  ${C_DIM}Token ID:${C_RESET}      $TOKEN_ID"
   echo -e "  ${C_DIM}Port:${C_RESET}          $DAEMON_PORT"
   echo ""
@@ -361,7 +372,10 @@ install_daemon() {
   for d in "$DATA_DIR" "$DATA_DIR/.archives" "$DATA_DIR/.backups" "/etc/spanel/vhosts" "/var/log/spanel" "/tmp/spanel"; do
     mkdir -p "$d"
   done
-  chown -R spanel:spanel "$DATA_DIR" /var/log/spanel 2>/dev/null || true
+  # /tmp/spanel must be owned by the daemon user too: the daemon writes an
+  # install scratch dir (install-<uuid>) there for every provision. Leaving it
+  # root-owned is what caused "EACCES: permission denied, mkdir '/tmp/spanel/…'".
+  chown -R spanel:spanel "$DATA_DIR" /var/log/spanel /tmp/spanel 2>/dev/null || true
   ok "Directories ready."
 
   # symlink daemon → workspace. A previous standalone daemon.mjs run may have
@@ -418,7 +432,7 @@ api:
   host: 0.0.0.0
   port: ${DAEMON_PORT}
   ssl:
-    enabled: false
+    enabled: ${DAEMON_TLS}
     cert: ""
     key: ""
   upload_limit: 256
@@ -456,6 +470,12 @@ token_id: ${TOKEN_ID}
 token: ${TOKEN}
 CFGEOF
     ok "Fallback config written."
+    if [[ "$DAEMON_TLS" == true ]]; then
+      ok "Daemon SSL enabled in config (api.ssl.enabled: true)."
+      warn "SSL is on but cert/key are empty. Set api.ssl.cert and api.ssl.key in $CONFIG_PATH, or front the daemon with nginx, before it can serve HTTPS."
+    else
+      ok "Daemon SSL disabled in config (api.ssl.enabled: false)."
+    fi
   fi
 
   chmod 640 "$CONFIG_PATH"

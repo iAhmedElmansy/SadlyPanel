@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { HardDrive, Plus, Server, Trash2, Wifi } from "lucide-react";
+import { ArrowUpCircle, HardDrive, Plus, Server, Trash2, Wifi } from "lucide-react";
 import { createLocationAction, deleteNodeAction, testNodeAction, type NodeState } from "./actions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button, SubmitButton } from "@/components/ui/button";
@@ -41,6 +41,8 @@ export interface NodeRow {
   health: NodeHealth;
   lastHeartbeatAt: string | null;
   daemonVersion: string | null;
+  /** Daemon version this node should update to, or null when up to date / unknown. */
+  daemonUpdateTo: string | null;
   live: {
     cpuPercent: number;
     memoryUsed: number;
@@ -74,10 +76,38 @@ export function NodeList({
   const t = useT();
 
   // Live health without a websocket: re-render the server component on a timer.
+  // Always on (no toggle) but efficient — the interval only runs while the tab is
+  // visible, and an immediate refresh fires when the operator returns to it. The
+  // pages are force-dynamic, so router.refresh() re-runs the server components
+  // against the database; there is no dedicated lightweight status endpoint.
   useEffect(() => {
     if (nodes.length === 0) return;
-    const timer = setInterval(() => router.refresh(), POLL_MS);
-    return () => clearInterval(timer);
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    const start = () => {
+      if (timer === null) timer = setInterval(() => router.refresh(), POLL_MS);
+    };
+    const stop = () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+      }
+    };
+    const onVisibility = () => {
+      if (document.hidden) {
+        stop();
+      } else {
+        router.refresh();
+        start();
+      }
+    };
+
+    if (!document.hidden) start();
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      stop();
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
   }, [nodes.length, router]);
 
   const report = (result: NodeState) => {
@@ -120,12 +150,18 @@ export function NodeList({
               <CardHeader
                 title={
                   <span className="flex flex-wrap items-center gap-2">
-                    <HealthHeart health={node.health} title={heartTitle(node.health, node.daemonVersion)} />
+                    <HealthHeart health={node.health} title={heartTitle(node.health, node.daemonVersion, t)} />
                     <Link href={`/admin/nodes/${node.id}`} className="hover:text-brand-soft">
                       {node.name}
                     </Link>
                     {node.maintenanceMode ? <Badge tone="warn">{t("admin.nlMaintenance")}</Badge> : null}
                     {!node.public ? <Badge tone="neutral">{t("admin.dmPrivate")}</Badge> : null}
+                    {node.daemonUpdateTo ? (
+                      <Badge tone="warn">
+                        <ArrowUpCircle className="size-3" />
+                        {t("admin.updNewVersion", { version: node.daemonUpdateTo })}
+                      </Badge>
+                    ) : null}
                   </span>
                 }
                 description={

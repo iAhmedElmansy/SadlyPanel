@@ -18,15 +18,15 @@ import { createHmac } from "node:crypto";
 import { SignJWT } from "jose";
 import type { IncomingMessage } from "node:http";
 
-import { SafePath, PathError, assertSafeName, matchesDenylist, directorySize, mimeFor, modeString } from "../src/fs-safe";
-import { AuthError, verifyPanelRequest, verifyWsToken } from "../src/auth";
-import { buildHostConfig, environmentArray, containerName } from "../src/docker";
-import { ProxyService } from "../src/proxy-service";
-import { FileService } from "../src/file-service";
-import { PanelClient } from "../src/panel-client";
-import { parseArgs, readConfigSummary, renderLocalConfig } from "../src/cli";
-import type { DaemonConfig } from "../src/config";
-import type { ServerSpec } from "../src/types";
+import { SafePath, PathError, assertSafeName, matchesDenylist, directorySize, mimeFor, modeString } from "../src/fs-safe.js";
+import { AuthError, verifyPanelRequest, verifyWsToken } from "../src/auth.js";
+import { buildHostConfig, environmentArray, containerName } from "../src/docker.js";
+import { ProxyService } from "../src/proxy-service.js";
+import { FileService } from "../src/file-service.js";
+import { PanelClient } from "../src/panel-client.js";
+import { parseArgs, readConfigSummary, renderLocalConfig } from "../src/cli.js";
+import type { DaemonConfig } from "../src/config.js";
+import type { ServerSpec } from "../src/types.js";
 
 let failures = 0;
 let total = 0;
@@ -86,6 +86,7 @@ function testConfig(root: string): DaemonConfig {
     remote: "https://panel.example.com",
     tokenId: TOKEN_ID,
     token: NODE_TOKEN,
+    skipDocker: false,
   };
 }
 

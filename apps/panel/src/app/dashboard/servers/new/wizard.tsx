@@ -1,6 +1,7 @@
 "use client";
 
-import { useActionState, useMemo, useState, type ReactNode } from "react";
+import { useActionState, useEffect, useMemo, useState, type ReactNode } from "react";
+import Link from "next/link";
 import {
   Cpu,
   Database,
@@ -18,7 +19,10 @@ import { Field, FormError, Input, Textarea } from "@/components/ui/form";
 import { SubmitButton } from "@/components/ui/button";
 import { Alert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/ui/empty-state";
 import { cn, formatMib } from "@/lib/utils";
+import { useT } from "@/lib/i18n/preferences";
+import { serversThatFit, nodeIsFull, type FreeResources } from "@/lib/services/quota-math";
 
 export interface UserWizardEggVariable {
   id: number;
@@ -39,15 +43,18 @@ export interface UserWizardEgg {
   variables: UserWizardEggVariable[];
 }
 
-/** Per-node capacity snapshot. `headroom` is null when the node is unlimited. */
+/** Per-node capacity snapshot. Free amounts are null when the dimension is unlimited. */
 export interface UserWizardNode {
   id: number;
   name: string;
   percentMemory: number;
   percentDisk: number;
   percentCpu: number;
-  headroom: number | null;
-  freePorts: number;
+  percentOverall: number;
+  freeMemory: number | null;
+  freeDisk: number | null;
+  freeCpu: number | null;
+  freeAllocations: number;
   planLocked: boolean;
   requiredPlanName: string | null;
   maintenance: boolean;
@@ -58,11 +65,48 @@ export interface UserWizardPlan {
   memory: number;
   disk: number;
   cpu: number;
+  remainingMemory: number | null;
+  remainingDisk: number | null;
+  remainingCpu: number | null;
+  usedMemory: number;
+  usedDisk: number;
+  usedCpu: number;
   allocationLimit: number;
   databaseLimit: number;
   backupLimit: number;
+  serverCount: number;
 }
-// __CHUNK_2__
+
+const MEM_MIN = 128;
+const DISK_MIN = 64;
+const CPU_MIN = 25;
+
+type NodeReason = "maintenance" | "plan" | "full" | "too-small" | null;
+
+interface NodeState {
+  locked: boolean;
+  reason: NodeReason;
+  fits: number | null;
+}
+
+/** Pure, size-aware node evaluation shared by the initial selection and live re-render. */
+function evalNode(
+  node: UserWizardNode,
+  size: { memory: number; disk: number; cpu: number; allocations: number },
+): NodeState {
+  const free: FreeResources = {
+    memory: node.freeMemory,
+    disk: node.freeDisk,
+    cpu: node.freeCpu,
+    allocations: node.freeAllocations,
+  };
+  if (node.maintenance) return { locked: true, reason: "maintenance", fits: null };
+  if (node.planLocked) return { locked: true, reason: "plan", fits: null };
+  if (nodeIsFull(free)) return { locked: true, reason: "full", fits: 0 };
+  const fits = serversThatFit(free, size);
+  if (fits !== null && fits < 1) return { locked: true, reason: "too-small", fits };
+  return { locked: false, reason: null, fits };
+}
 
 /** A slim used/free capacity bar. Turns amber past 75% and red past 90%. */
 function CapacityBar({ label, percent, icon }: { label: string; percent: number; icon: ReactNode }) {
@@ -92,20 +136,66 @@ export function UserServerWizard({
   nodes: UserWizardNode[];
   plan: UserWizardPlan;
 }) {
+  const t = useT();
   const [state, action] = useActionState<CreateState, FormData>(createUserServerAction, {});
 
-  const selectableNodes = useMemo(
-    () => nodes.filter((n) => !n.planLocked && !n.maintenance && n.headroom !== 0),
-    [nodes],
-  );
+  const memUnlimited = plan.remainingMemory === null;
+  const diskUnlimited = plan.remainingDisk === null;
+  const cpuUnlimited = plan.remainingCpu === null;
+  const remMem = plan.remainingMemory ?? Number.POSITIVE_INFINITY;
+  const remDisk = plan.remainingDisk ?? Number.POSITIVE_INFINITY;
+  const remCpu = plan.remainingCpu ?? Number.POSITIVE_INFINITY;
+
+  // Fully-consumed plan: not enough of some capped dimension left for even a
+  // minimum server. Block creation with a clear upgrade / free-up message.
+  const outOfQuota =
+    (!memUnlimited && remMem < MEM_MIN) ||
+    (!diskUnlimited && remDisk < DISK_MIN) ||
+    (!cpuUnlimited && remCpu < CPU_MIN);
+
+  const maxPorts = Math.max(1, plan.allocationLimit);
+
+  // Sensible defaults: unlimited dimensions get a modest starting size; capped
+  // dimensions default to the whole remaining allowance (which equals the plan
+  // total for a user who owns no servers yet).
+  const initMemory = memUnlimited ? 2048 : Math.max(MEM_MIN, remMem);
+  const initDisk = diskUnlimited ? 10240 : Math.max(DISK_MIN, remDisk);
+  const initCpu = cpuUnlimited ? 100 : Math.max(CPU_MIN, remCpu);
 
   const [eggId, setEggId] = useState<number>(eggs[0]?.id ?? 0);
-  const [nodeId, setNodeId] = useState<number>(selectableNodes[0]?.id ?? 0);
-  const [memory, setMemory] = useState<number>(plan.memory);
-  const [disk, setDisk] = useState<number>(plan.disk);
-  const [cpu, setCpu] = useState<number>(plan.cpu);
+  const [memory, setMemory] = useState<number>(initMemory);
+  const [disk, setDisk] = useState<number>(initDisk);
+  const [cpu, setCpu] = useState<number>(initCpu);
   const [ports, setPorts] = useState<number>(1);
   const [databases, setDatabases] = useState<number>(plan.databaseLimit);
+
+  const requestedSize = useMemo(() => ({ memory, disk, cpu, allocations: ports }), [memory, disk, cpu, ports]);
+
+  const nodeStates = useMemo(() => {
+    const map = new Map<number, NodeState>();
+    for (const node of nodes) map.set(node.id, evalNode(node, requestedSize));
+    return map;
+  }, [nodes, requestedSize]);
+
+  const selectableNodes = useMemo(() => nodes.filter((n) => !nodeStates.get(n.id)?.locked), [nodes, nodeStates]);
+  const selectableIds = selectableNodes.map((n) => n.id).join(",");
+
+  const [nodeId, setNodeId] = useState<number>(
+    () =>
+      nodes.find((n) => !evalNode(n, { memory: initMemory, disk: initDisk, cpu: initCpu, allocations: 1 }).locked)?.id ??
+      0,
+  );
+
+  // Keep the selection valid: if resizing makes the chosen node unfit, hop to
+  // the first node that still works (leaving deploy disabled when none do).
+  useEffect(() => {
+    const current = nodeStates.get(nodeId);
+    if (!current || current.locked) {
+      const first = selectableNodes[0]?.id;
+      if (first) setNodeId(first);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectableIds, nodeId]);
 
   const egg = useMemo(() => eggs.find((item) => item.id === eggId), [eggs, eggId]);
   const grouped = useMemo(() => {
@@ -118,24 +208,149 @@ export function UserServerWizard({
     return [...map.entries()];
   }, [eggs]);
 
-  const maxPorts = Math.max(1, plan.allocationLimit);
   const viewableVars = egg?.variables.filter((v) => v.userViewable) ?? [];
-  const canDeploy = selectableNodes.length > 0 && nodeId > 0 && eggs.length > 0;
+
+  const overMemory = !memUnlimited && memory > remMem;
+  const overDisk = !diskUnlimited && disk > remDisk;
+  const overCpu = !cpuUnlimited && cpu > remCpu;
+  const belowMin = memory < MEM_MIN || disk < DISK_MIN || cpu < CPU_MIN;
+
+  const selectedState = nodeStates.get(nodeId);
+  const nodeReady = !!selectedState && !selectedState.locked;
+  const canDeploy =
+    eggs.length > 0 && !outOfQuota && nodeReady && !overMemory && !overDisk && !overCpu && !belowMin;
 
   const kindLabel = (kind: string) =>
-    ({ game: "Game", application: "Application", webhost: "Website" })[kind] ?? kind;
+    ({
+      game: t("dashboard.serversKindGame"),
+      application: t("dashboard.serversKindApplication"),
+      webhost: t("dashboard.serversKindWebhost"),
+    })[kind] ?? kind;
+
+  const fmtMem = (value: number, unlimited: boolean) => (unlimited ? t("dashboard.cswUnlimited") : formatMib(value));
+  const usagePercent = (used: number, total: number) =>
+    total > 0 ? Math.min(100, Math.max(0, Math.round((used / total) * 100))) : 0;
+
+  const nodeReason = (node: UserWizardNode, s: NodeState): { text: string; icon: ReactNode } | null => {
+    switch (s.reason) {
+      case "maintenance":
+        return { text: t("dashboard.cswNodeMaintenance"), icon: <Wrench className="size-3" /> };
+      case "plan":
+        return {
+          text: t("dashboard.cswNodeRequires", {
+            plan: node.requiredPlanName ?? t("dashboard.cswNodeRequiresFallback"),
+          }),
+          icon: <Lock className="size-3" />,
+        };
+      case "full":
+        return { text: t("dashboard.cswNodeFull"), icon: <Lock className="size-3" /> };
+      case "too-small":
+        return { text: t("dashboard.cswNodeTooSmall"), icon: <Lock className="size-3" /> };
+      default:
+        return null;
+    }
+  };
+
+  // --- Plan quota summary (rendered in every state) ---
+  const quotaTiles: { label: string; icon: ReactNode; main: string; percent: number | null }[] = [
+    {
+      label: t("dashboard.cswRam"),
+      icon: <MemoryStick className="size-3.5" />,
+      main: memUnlimited
+        ? t("dashboard.cswUnlimited")
+        : t("dashboard.cswLeftOfTotal", { remaining: formatMib(remMem), total: formatMib(plan.memory) }),
+      percent: memUnlimited ? null : usagePercent(plan.usedMemory, plan.memory),
+    },
+    {
+      label: t("dashboard.cswDisk"),
+      icon: <HardDrive className="size-3.5" />,
+      main: diskUnlimited
+        ? t("dashboard.cswUnlimited")
+        : t("dashboard.cswLeftOfTotal", { remaining: formatMib(remDisk), total: formatMib(plan.disk) }),
+      percent: diskUnlimited ? null : usagePercent(plan.usedDisk, plan.disk),
+    },
+    {
+      label: t("dashboard.cswCpu"),
+      icon: <Cpu className="size-3.5" />,
+      main: cpuUnlimited
+        ? t("dashboard.cswUnlimited")
+        : t("dashboard.cswLeftOfTotal", { remaining: `${remCpu}%`, total: `${plan.cpu}%` }),
+      percent: cpuUnlimited ? null : usagePercent(plan.usedCpu, plan.cpu),
+    },
+    { label: t("dashboard.cswPorts"), icon: <Network className="size-3.5" />, main: String(maxPorts), percent: null },
+    {
+      label: t("dashboard.cswDatabases"),
+      icon: <Database className="size-3.5" />,
+      main: String(plan.databaseLimit),
+      percent: null,
+    },
+    {
+      label: t("dashboard.cswBackups"),
+      icon: <ServerIcon className="size-3.5" />,
+      main: String(plan.backupLimit),
+      percent: null,
+    },
+  ];
+
+  const quotaPanel = (
+    <Card>
+      <CardHeader title={t("dashboard.cswPlanTitle", { plan: plan.name })} description={t("dashboard.cswPlanDesc")} />
+      <CardBody className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        {quotaTiles.map((item) => (
+          <div key={item.label} className="rounded-lg border border-line bg-surface-2/40 p-2.5">
+            <span className="flex items-center gap-1 text-[11px] text-ink-dim">
+              {item.icon}
+              {item.label}
+            </span>
+            <p className="mt-0.5 text-sm font-semibold text-ink">{item.main}</p>
+            {item.percent !== null ? (
+              <div className="mt-1.5 h-1 overflow-hidden rounded-full bg-surface-2">
+                <div
+                  className={cn(
+                    "h-full rounded-full",
+                    item.percent >= 90 ? "bg-bad" : item.percent >= 75 ? "bg-warn" : "bg-brand",
+                  )}
+                  style={{ width: `${item.percent}%` }}
+                />
+              </div>
+            ) : null}
+          </div>
+        ))}
+      </CardBody>
+    </Card>
+  );
 
   if (eggs.length === 0) {
     return (
-      <Card>
-        <CardHeader title="Nothing to deploy yet" />
-        <CardBody className="text-sm text-ink-muted">
-          No services are available right now. Please check back later or contact an administrator.
-        </CardBody>
-      </Card>
+      <div className="space-y-6">
+        {quotaPanel}
+        <Card>
+          <CardHeader title={t("dashboard.serversNotReadyTitle")} />
+          <CardBody className="text-sm text-ink-muted">{t("dashboard.serversNotReadyNoServices")}</CardBody>
+        </Card>
+      </div>
     );
   }
-// __CHUNK_3__
+
+  if (outOfQuota) {
+    return (
+      <div className="space-y-6">
+        {quotaPanel}
+        <Card>
+          <EmptyState
+            icon={<Lock className="size-5" />}
+            title={t("dashboard.cswNoQuotaTitle")}
+            description={t("dashboard.cswNoQuotaDesc", { plan: plan.name })}
+            action={
+              <Link href="/dashboard/billing" className="btn btn-primary">
+                {t("dashboard.cswViewPlans")}
+              </Link>
+            }
+          />
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <form action={action} className="space-y-6">
@@ -143,33 +358,13 @@ export function UserServerWizard({
       <input type="hidden" name="eggId" value={eggId} />
       <input type="hidden" name="nodeId" value={nodeId} />
 
-      <Card>
-        <CardHeader
-          title={`Your ${plan.name} plan`}
-          description="Everything below is capped by your plan. Pick a smaller size if you don't need it all."
-        />
-        <CardBody className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          {[
-            { label: "RAM", value: formatMib(plan.memory), icon: <MemoryStick className="size-3.5" /> },
-            { label: "Disk", value: formatMib(plan.disk), icon: <HardDrive className="size-3.5" /> },
-            { label: "CPU", value: `${plan.cpu}%`, icon: <Cpu className="size-3.5" /> },
-            { label: "Ports", value: String(maxPorts), icon: <Network className="size-3.5" /> },
-            { label: "Databases", value: String(plan.databaseLimit), icon: <Database className="size-3.5" /> },
-            { label: "Backups", value: String(plan.backupLimit), icon: <ServerIcon className="size-3.5" /> },
-          ].map((item) => (
-            <div key={item.label} className="rounded-lg border border-line bg-surface-2/40 p-2.5">
-              <span className="flex items-center gap-1 text-[11px] text-ink-dim">
-                {item.icon}
-                {item.label}
-              </span>
-              <p className="mt-0.5 text-sm font-semibold text-ink">{item.value}</p>
-            </div>
-          ))}
-        </CardBody>
-      </Card>
+      {quotaPanel}
 
       <Card>
-        <CardHeader title="1. Choose a service" description="What would you like to run?" />
+        <CardHeader
+          title={t("dashboard.serversStepService")}
+          description={t("dashboard.serversStepServiceDescription")}
+        />
         <CardBody className="space-y-5">
           {grouped.map(([nest, items]) => (
             <div key={nest}>
@@ -203,41 +398,36 @@ export function UserServerWizard({
           ))}
         </CardBody>
       </Card>
-// __CHUNK_4__
 
       <Card>
-        <CardHeader
-          title="2. Pick a location"
-          description="Each node shows how full it is and how many more servers like yours it can host."
-        />
+        <CardHeader title={t("dashboard.cswStepLocation")} description={t("dashboard.cswStepLocationDesc")} />
         <CardBody className="space-y-3">
-          {selectableNodes.length === 0 ? (
-            <Alert tone="warn">
-              No nodes are available for your plan right now. Please try again later or contact an administrator.
-            </Alert>
-          ) : null}
+          {selectableNodes.length === 0 ? <Alert tone="warn">{t("dashboard.cswNoNodes")}</Alert> : null}
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
             {nodes.map((n) => {
-              const active = n.id === nodeId;
-              const locked = n.planLocked || n.maintenance || n.headroom === 0;
-              const reason = n.maintenance
-                ? "In maintenance"
-                : n.planLocked
-                  ? `Requires ${n.requiredPlanName ?? "a higher"} plan`
-                  : n.headroom === 0
-                    ? "Full"
+              const s = nodeStates.get(n.id)!;
+              const active = n.id === nodeId && !s.locked;
+              const reason = nodeReason(n, s);
+              const subline = !s.locked
+                ? s.fits === null
+                  ? t("dashboard.cswNodeRoomMany")
+                  : t("dashboard.cswNodeRoomN", { count: s.fits })
+                : s.reason === "too-small"
+                  ? t("dashboard.cswNodeRoomNone")
+                  : s.reason === "full"
+                    ? t("dashboard.cswNodeFullPercent", { percent: n.percentOverall })
                     : null;
               return (
                 <button
                   type="button"
                   key={n.id}
-                  disabled={locked}
+                  disabled={s.locked}
                   aria-pressed={active}
-                  aria-disabled={locked}
-                  onClick={() => !locked && setNodeId(n.id)}
+                  aria-disabled={s.locked}
+                  onClick={() => !s.locked && setNodeId(n.id)}
                   className={cn(
                     "rounded-lg border p-3 text-left transition",
-                    locked
+                    s.locked
                       ? "cursor-not-allowed border-line bg-surface-2/20 opacity-60"
                       : active
                         ? "border-brand bg-brand/10"
@@ -246,65 +436,63 @@ export function UserServerWizard({
                 >
                   <div className="flex items-center justify-between gap-2">
                     <span className="truncate text-sm font-medium text-ink">{n.name}</span>
-                    {locked ? (
+                    {reason ? (
                       <Badge tone="warn">
-                        {n.maintenance ? <Wrench className="size-3" /> : <Lock className="size-3" />}
-                        {reason}
+                        {reason.icon}
+                        {reason.text}
                       </Badge>
                     ) : (
                       <Badge tone="ok">
-                        {n.headroom === null ? "Available" : `${n.headroom} slot${n.headroom === 1 ? "" : "s"}`}
+                        {s.fits === null
+                          ? t("dashboard.cswNodeAvailable")
+                          : t("dashboard.cswNodeSlots", { count: s.fits })}
                       </Badge>
                     )}
                   </div>
                   <div className="mt-3 space-y-2">
-                    <CapacityBar label="RAM" percent={n.percentMemory} icon={<MemoryStick className="size-3" />} />
-                    <CapacityBar label="Disk" percent={n.percentDisk} icon={<HardDrive className="size-3" />} />
-                    <CapacityBar label="CPU" percent={n.percentCpu} icon={<Cpu className="size-3" />} />
+                    <CapacityBar label={t("dashboard.cswRam")} percent={n.percentMemory} icon={<MemoryStick className="size-3" />} />
+                    <CapacityBar label={t("dashboard.cswDisk")} percent={n.percentDisk} icon={<HardDrive className="size-3" />} />
+                    <CapacityBar label={t("dashboard.cswCpu")} percent={n.percentCpu} icon={<Cpu className="size-3" />} />
                   </div>
-                  <p className="mt-2 text-[11px] text-ink-dim">
-                    {n.headroom === null
-                      ? "Room for many more servers"
-                      : `Room for ${n.headroom} more server${n.headroom === 1 ? "" : "s"} like yours`}
-                  </p>
+                  {subline ? <p className="mt-2 text-[11px] text-ink-dim">{subline}</p> : null}
                 </button>
               );
             })}
           </div>
         </CardBody>
       </Card>
-// __CHUNK_5__
 
       <Card>
-        <CardHeader title="3. Name your server" />
+        <CardHeader title={t("dashboard.cswStepName")} />
         <CardBody className="space-y-4">
-          <Field label="Server name" required error={state.fieldErrors?.name}>
-            <Input name="name" required maxLength={80} placeholder="My awesome server" />
+          <Field label={t("dashboard.serversNameLabel")} required error={state.fieldErrors?.name}>
+            <Input name="name" required maxLength={80} placeholder={t("dashboard.serversNamePlaceholder")} />
           </Field>
-          <Field label="Description" hint="Optional — a short note to help you recognise it later.">
-            <Textarea name="description" maxLength={500} rows={2} placeholder="What is this server for?" />
+          <Field label={t("dashboard.serversDescriptionLabel")} hint={t("dashboard.serversDescriptionHint")}>
+            <Textarea name="description" maxLength={500} rows={2} placeholder={t("dashboard.serversDescriptionPlaceholder")} />
           </Field>
         </CardBody>
       </Card>
 
       <Card>
-        <CardHeader title="4. Choose your resources" description="Slide down from your plan maximum if you'd like." />
+        <CardHeader title={t("dashboard.cswStepResources")} description={t("dashboard.cswStepResourcesDesc")} />
         <CardBody className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           <Field
-            label={
-              <span className="flex items-center gap-1.5">
-                <MemoryStick className="size-3.5" /> Memory
-              </span>
-            }
+            label={<span className="flex items-center gap-1.5"><MemoryStick className="size-3.5" /> {t("dashboard.serversMemoryLabel")}</span>}
             required
-            error={state.fieldErrors?.memory}
-            hint={`${formatMib(memory)} · plan allows up to ${formatMib(plan.memory)}`}
+            error={
+              state.fieldErrors?.memory ??
+              (overMemory
+                ? t("dashboard.cswErrQuota", { resource: t("dashboard.cswRam"), remaining: formatMib(remMem) })
+                : undefined)
+            }
+            hint={t("dashboard.cswAllowanceHint", { value: formatMib(memory), max: fmtMem(remMem, memUnlimited) })}
           >
             <Input
               name="memory"
               type="number"
-              min={128}
-              max={plan.memory}
+              min={MEM_MIN}
+              max={memUnlimited ? undefined : remMem}
               step={128}
               required
               value={memory}
@@ -313,43 +501,44 @@ export function UserServerWizard({
           </Field>
 
           <Field
-            label={
-              <span className="flex items-center gap-1.5">
-                <HardDrive className="size-3.5" /> Disk
-              </span>
-            }
+            label={<span className="flex items-center gap-1.5"><HardDrive className="size-3.5" /> {t("dashboard.serversDiskLabel")}</span>}
             required
-            error={state.fieldErrors?.disk}
-            hint={`${formatMib(disk)} · plan allows up to ${formatMib(plan.disk)}`}
+            error={
+              state.fieldErrors?.disk ??
+              (overDisk
+                ? t("dashboard.cswErrQuota", { resource: t("dashboard.cswDisk"), remaining: formatMib(remDisk) })
+                : undefined)
+            }
+            hint={t("dashboard.cswAllowanceHint", { value: formatMib(disk), max: fmtMem(remDisk, diskUnlimited) })}
           >
             <Input
               name="disk"
               type="number"
-              min={64}
-              max={plan.disk}
+              min={DISK_MIN}
+              max={diskUnlimited ? undefined : remDisk}
               step={64}
               required
               value={disk}
               onChange={(event) => setDisk(Number(event.target.value))}
             />
           </Field>
-// __CHUNK_6__
 
           <Field
-            label={
-              <span className="flex items-center gap-1.5">
-                <Cpu className="size-3.5" /> CPU
-              </span>
-            }
+            label={<span className="flex items-center gap-1.5"><Cpu className="size-3.5" /> {t("dashboard.serversCpuLabel")}</span>}
             required
-            error={state.fieldErrors?.cpu}
-            hint={`${cpu}% · plan allows up to ${plan.cpu}% (100% = one core)`}
+            error={
+              state.fieldErrors?.cpu ??
+              (overCpu
+                ? t("dashboard.cswErrQuota", { resource: t("dashboard.cswCpu"), remaining: `${remCpu}%` })
+                : undefined)
+            }
+            hint={t("dashboard.cswCpuHint", { value: cpu, max: cpuUnlimited ? t("dashboard.cswUnlimited") : remCpu })}
           >
             <Input
               name="cpu"
               type="number"
-              min={25}
-              max={plan.cpu}
+              min={CPU_MIN}
+              max={cpuUnlimited ? undefined : remCpu}
               step={25}
               required
               value={cpu}
@@ -358,13 +547,9 @@ export function UserServerWizard({
           </Field>
 
           <Field
-            label={
-              <span className="flex items-center gap-1.5">
-                <Network className="size-3.5" /> Ports
-              </span>
-            }
+            label={<span className="flex items-center gap-1.5"><Network className="size-3.5" /> {t("dashboard.cswPorts")}</span>}
             error={state.fieldErrors?.ports}
-            hint={`A private IP + port is assigned automatically. Up to ${maxPorts}.`}
+            hint={t("dashboard.cswPortsHint", { max: maxPorts })}
           >
             <Input
               name="ports"
@@ -378,13 +563,9 @@ export function UserServerWizard({
           </Field>
 
           <Field
-            label={
-              <span className="flex items-center gap-1.5">
-                <Database className="size-3.5" /> Databases
-              </span>
-            }
+            label={<span className="flex items-center gap-1.5"><Database className="size-3.5" /> {t("dashboard.cswDatabases")}</span>}
             error={state.fieldErrors?.databases}
-            hint={`Up to ${plan.databaseLimit} included in your plan.`}
+            hint={t("dashboard.cswDatabasesHint", { max: plan.databaseLimit })}
           >
             <Input
               name="databases"
@@ -398,11 +579,10 @@ export function UserServerWizard({
           </Field>
         </CardBody>
       </Card>
-// __CHUNK_7__
 
       {viewableVars.length > 0 ? (
         <Card>
-          <CardHeader title="5. Service options" description="These are passed to your server when it starts." />
+          <CardHeader title={t("dashboard.cswStepOptions")} description={t("dashboard.cswStepOptionsDesc")} />
           <CardBody className="grid gap-4 sm:grid-cols-2">
             {viewableVars.map((variable) => (
               <Field key={variable.id} label={variable.name} hint={variable.description ?? variable.envVariable}>
@@ -421,12 +601,17 @@ export function UserServerWizard({
         <CardBody className="flex flex-wrap items-center justify-between gap-4">
           <p className="flex items-center gap-1.5 text-xs text-ink-dim">
             <ServerIcon className="size-3.5" />
-            Your server installs on the node and starts automatically. Track progress on its console.
+            {t("dashboard.cswDeployNote")}
           </p>
-          <SubmitButton pendingLabel="Deploying…" disabled={!canDeploy}>
-            <Rocket className="size-4" />
-            Deploy server
-          </SubmitButton>
+          <div className="flex flex-col items-end gap-1">
+            <SubmitButton pendingLabel={t("dashboard.cswDeploying")} disabled={!canDeploy}>
+              <Rocket className="size-4" />
+              {t("dashboard.cswDeploy")}
+            </SubmitButton>
+            {!nodeReady && selectableNodes.length > 0 ? (
+              <span className="text-[11px] text-ink-dim">{t("dashboard.cswSelectNodeFirst")}</span>
+            ) : null}
+          </div>
         </CardBody>
       </Card>
     </form>

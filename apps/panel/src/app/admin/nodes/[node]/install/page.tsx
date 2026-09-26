@@ -3,11 +3,9 @@ import { prisma } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth/session";
 import { decrypt } from "@/lib/crypto";
 import {
-  renderConfigureCommand,
   renderDaemonConfig,
-  renderInstallCommand,
-  renderNodeInstallCommand,
   renderServiceCommands,
+  renderSetConfigCommand,
   resolvePanelUrl,
 } from "@/lib/services/node-config";
 import { NodeConfiguration } from "../node-configuration";
@@ -32,18 +30,14 @@ export default async function NodeInstallPage({ params }: { params: Promise<{ no
   const panelUrl = await resolvePanelUrl();
   const options = { panelUrl, token };
   const config = renderDaemonConfig(node, options);
-  const installCommand = renderInstallCommand(node, options);
-  const nodeInstallCommand = renderNodeInstallCommand(node, options);
-  const configureCommand = renderConfigureCommand(node, options);
+  const setConfigCommand = renderSetConfigCommand(node, options);
   const serviceCommands = renderServiceCommands();
 
   return (
     <NodeConfiguration
       nodeId={node.id}
       config={config}
-      installCommand={installCommand}
-      nodeInstallCommand={nodeInstallCommand}
-      configureCommand={configureCommand}
+      setConfigCommand={setConfigCommand}
       serviceCommands={serviceCommands}
     />
   );

@@ -6,11 +6,12 @@ import { prisma } from "@/lib/db";
 import { clientIp, requireUser } from "@/lib/auth/session";
 import { serverCreateSchema } from "@/lib/validation";
 import { provisionServer, pickFreeAllocations } from "@/lib/services/provision";
-import { assertUserCanUseNode, getUserPlan } from "@/lib/services/entitlements";
+import { assertUserCanUseNode, getUserPlanQuota, quotaExceededDimension } from "@/lib/services/entitlements";
 import { assertNodeHasCapacity } from "@/lib/services/capacity";
 import { getSetting } from "@/lib/settings";
 import { SETTING_KEYS } from "@/lib/constants";
-import { parseJsonSafe } from "@/lib/utils";
+import { parseJsonSafe, formatMib } from "@/lib/utils";
+import { getT } from "@/lib/i18n/server";
 
 export interface CreateState {
   error?: string;
@@ -19,12 +20,16 @@ export interface CreateState {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+/** Minimum sensible per-server size for a capped dimension (mirrors the wizard). */
+const FLOORS = { memory: 128, disk: 64, cpu: 25 } as const;
+
 /**
  * The limited self-service payload. Users pick a service, a node, a name and
  * how much RAM / disk / CPU / ports / databases they want — everything else
  * (docker image, raw allocations, swap, io, hostname) is derived server-side
- * from their plan and the node. The plan is the hard ceiling; requested values
- * are clamped down to it, never up.
+ * from their plan and the node. Memory / disk / CPU are pooled: a request is
+ * rejected when it exceeds what the plan grants minus what the user's existing
+ * servers already consume. Ports / databases are per-server caps clamped down.
  */
 const userCreateSchema = z.object({
   name: z.string().trim().min(1, "Server name is required.").max(80),
@@ -45,6 +50,7 @@ const userCreateSchema = z.object({
  */
 export async function createUserServerAction(_prev: CreateState, formData: FormData): Promise<CreateState> {
   const user = await requireUser();
+  const t = await getT();
 
   const environment: Record<string, string> = {};
   for (const [key, value] of formData.entries()) {
@@ -69,42 +75,63 @@ export async function createUserServerAction(_prev: CreateState, formData: FormD
       const key = String(issue.path[0] ?? "form");
       if (!fieldErrors[key]) fieldErrors[key] = issue.message;
     }
-    return { fieldErrors, error: "Please review the highlighted fields." };
+    return { fieldErrors, error: t("dashboard.cswErrReviewFields") };
   }
 
-  // A plan is mandatory for self-service. The UI shows a subscribe prompt, but
-  // this is the authoritative gate.
-  const plan = await getUserPlan(user.id);
-  if (!plan) {
-    return { error: "You need an active plan to deploy a server. Choose a plan from the Billing page first." };
+  // A plan is mandatory for self-service, and it also bounds how much RAM / disk
+  // / CPU is left across the user's existing servers. The UI shows a subscribe
+  // prompt, but this is the authoritative gate.
+  const quota = await getUserPlanQuota(user.id);
+  if (!quota) {
+    return { error: t("dashboard.cswErrPlanRequired") };
   }
+  const { plan } = quota;
 
   // The node must be public, out of maintenance, and unlocked for the plan.
   const node = await prisma.node.findUnique({
     where: { id: parsed.data.nodeId },
     select: { public: true, maintenanceMode: true },
   });
-  if (!node?.public) return { error: "That node is not available for self-service deployment." };
-  if (node.maintenanceMode) return { error: "That node is in maintenance. Please pick another node." };
+  if (!node?.public) return { error: t("dashboard.cswErrNodeUnavailable") };
+  if (node.maintenanceMode) return { error: t("dashboard.cswErrNodeMaintenance") };
 
   const gate = await assertUserCanUseNode(user, parsed.data.nodeId);
-  if (!gate.ok) return { error: gate.error ?? "This node is not available on your current plan." };
+  if (!gate.ok) {
+    return {
+      error: gate.requiredPlanName
+        ? t("dashboard.cswErrNodeLockedPlan", { plan: gate.requiredPlanName })
+        : t("dashboard.cswErrNodeLocked"),
+    };
+  }
 
   // Panel-wide server count cap for non-admins.
   if (user.role !== "admin") {
     const limit = Number((await getSetting(SETTING_KEYS.defaultServerLimit)) || 2);
-    if (limit > 0) {
-      const owned = await prisma.server.count({ where: { ownerId: user.id } });
-      if (owned >= limit) {
-        return { error: `You have reached your limit of ${limit} server(s). Contact an administrator for more.` };
-      }
+    if (limit > 0 && quota.serverCount >= limit) {
+      return { error: t("dashboard.cswErrServerLimit", { limit }) };
     }
   }
 
-  // Clamp every tunable down to the plan ceiling (and the schema's hard caps).
-  const memory = clamp(Math.min(parsed.data.memory, plan.memory || parsed.data.memory), 0, 1_048_576);
-  const disk = clamp(Math.min(parsed.data.disk, plan.disk || parsed.data.disk), 64, 10_485_760);
-  const cpu = clamp(Math.min(parsed.data.cpu, plan.cpu || parsed.data.cpu), 0, 6400);
+  // Never trust the client: floor each capped dimension to a sane minimum (so a
+  // forged 0 can't request "unlimited" on a capped plan), clamp to the hard
+  // schema ceiling, then reject anything above the pooled remaining allowance.
+  const effective = (dim: "memory" | "disk" | "cpu", hardMax: number) => {
+    const raw = parsed.data[dim];
+    const floored = quota.unlimited[dim] ? raw : Math.max(FLOORS[dim], raw);
+    return clamp(floored, 0, hardMax);
+  };
+  const memory = effective("memory", 1_048_576);
+  const disk = effective("disk", 10_485_760);
+  const cpu = effective("cpu", 6400);
+
+  const over = quotaExceededDimension(quota, { memory, disk, cpu });
+  if (over) {
+    const resource = t(over === "memory" ? "dashboard.cswRam" : over === "disk" ? "dashboard.cswDisk" : "dashboard.cswCpu");
+    const remaining = over === "cpu" ? `${quota.remaining.cpu}%` : formatMib(quota.remaining[over]);
+    const message = t("dashboard.cswErrQuota", { resource, remaining });
+    return { fieldErrors: { [over]: message }, error: message };
+  }
+
   const maxPorts = Math.max(1, plan.allocationLimit);
   const ports = clamp(parsed.data.ports, 1, maxPorts);
   const databases = clamp(parsed.data.databases, 0, plan.databaseLimit);
@@ -113,10 +140,10 @@ export async function createUserServerAction(_prev: CreateState, formData: FormD
 
   // Users never choose a docker image — use the egg's first configured image.
   const egg = await prisma.egg.findUnique({ where: { id: parsed.data.eggId }, select: { dockerImages: true } });
-  if (!egg) return { error: "The selected service no longer exists." };
+  if (!egg) return { error: t("dashboard.cswErrServiceGone") };
   const dockerImage = Object.values(parseJsonSafe<Record<string, string>>(egg.dockerImages, {}))[0];
   if (!dockerImage) {
-    return { error: "The selected service has no runtime image configured. Contact an administrator." };
+    return { error: t("dashboard.cswErrNoImage") };
   }
 
   // Reserve random ports up-front; raw IP:port pairs are never shown to users.
@@ -126,8 +153,8 @@ export async function createUserServerAction(_prev: CreateState, formData: FormD
     const picked = await pickFreeAllocations(parsed.data.nodeId, ports);
     allocationId = picked.allocationId;
     additionalAllocationIds = picked.additionalAllocationIds;
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "That node has no free ports right now." };
+  } catch {
+    return { error: t("dashboard.cswErrNoPorts") };
   }
 
   // Assemble a payload the shared provisioner understands. Re-validate through
@@ -158,14 +185,14 @@ export async function createUserServerAction(_prev: CreateState, formData: FormD
     environment,
   });
   if (!payload.success) {
-    return { error: "We couldn't build a valid server configuration. Please adjust your selections and try again." };
+    return { error: t("dashboard.cswErrInvalidConfig") };
   }
 
   // Friendly capacity pre-check (provisionServer re-checks authoritatively).
   try {
     await assertNodeHasCapacity(parsed.data.nodeId, { memory, disk, cpu });
-  } catch (error) {
-    return { error: error instanceof Error ? error.message : "That node doesn't have enough capacity right now." };
+  } catch {
+    return { error: t("dashboard.cswErrCapacity") };
   }
 
   let uuidShort: string;
@@ -178,12 +205,10 @@ export async function createUserServerAction(_prev: CreateState, formData: FormD
     });
     uuidShort = result.uuidShort;
     if (result.daemonError) {
-      return {
-        error: `Server record created, but the node could not be reached: ${result.daemonError}. An administrator can retry the install.`,
-      };
+      return { error: t("dashboard.cswErrDaemon", { error: result.daemonError }) };
     }
   } catch (error) {
-    return { error: error instanceof Error ? error.message : "Unable to create the server." };
+    return { error: error instanceof Error ? error.message : t("dashboard.cswErrGeneric") };
   }
 
   redirect(`/dashboard/servers/${uuidShort}?created=1`);

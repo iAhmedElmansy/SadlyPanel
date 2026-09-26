@@ -1,4 +1,5 @@
 import { prisma } from "../db";
+import { serversThatFit, type FreeResources } from "./quota-math";
 
 export interface NodeCapacity {
   memory: { used: number; total: number; overallocated: number };
@@ -144,26 +145,37 @@ export async function getNodeCapacitySummary(nodeId: number): Promise<NodeCapaci
 }
 
 /**
+ * A node's free resource amounts as a {@link FreeResources} shape, with
+ * unlimited dimensions mapped to `null`. Handy for handing raw headroom to the
+ * client wizard, which recomputes "servers that fit" live against the size the
+ * customer is requesting.
+ */
+export function freeResourcesFromSummary(summary: NodeCapacitySummary): FreeResources {
+  return {
+    memory: summary.memoryUnlimited ? null : summary.freeMemory,
+    disk: summary.diskUnlimited ? null : summary.freeDisk,
+    cpu: summary.cpuUnlimited ? null : summary.freeCpu,
+    allocations: summary.freeAllocations,
+  };
+}
+
+/**
  * How many MORE servers of the given plan shape fit on a node, limited by the
  * tightest of memory / disk / cpu / free port allocations. Unlimited dimensions
  * (overallocate -1) and non-positive plan limits are skipped. Free allocations
  * always bound the result, since every server needs at least one port. Never
- * negative.
+ * negative; Number.POSITIVE_INFINITY when no dimension bounds the result.
  */
 export async function getNodeServerHeadroom(
   nodeId: number,
   planLimits: { memory: number; disk: number; cpu: number; allocations?: number },
 ): Promise<number> {
-  const s = await getNodeCapacitySummary(nodeId);
-  const candidates: number[] = [];
-
-  if (planLimits.memory > 0 && !s.memoryUnlimited) candidates.push(Math.floor(s.freeMemory / planLimits.memory));
-  if (planLimits.disk > 0 && !s.diskUnlimited) candidates.push(Math.floor(s.freeDisk / planLimits.disk));
-  if (planLimits.cpu > 0 && !s.cpuUnlimited) candidates.push(Math.floor(s.freeCpu / planLimits.cpu));
-
-  const portsPerServer = planLimits.allocations && planLimits.allocations > 0 ? planLimits.allocations : 1;
-  candidates.push(Math.floor(s.freeAllocations / portsPerServer));
-
-  if (candidates.length === 0) return Number.POSITIVE_INFINITY;
-  return Math.max(0, Math.min(...candidates));
+  const summary = await getNodeCapacitySummary(nodeId);
+  const fit = serversThatFit(freeResourcesFromSummary(summary), {
+    memory: planLimits.memory,
+    disk: planLimits.disk,
+    cpu: planLimits.cpu,
+    allocations: planLimits.allocations && planLimits.allocations > 0 ? planLimits.allocations : 1,
+  });
+  return fit === null ? Number.POSITIVE_INFINITY : fit;
 }

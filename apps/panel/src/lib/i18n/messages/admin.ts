@@ -76,8 +76,25 @@ const en = {
   nodesStatOfflineUnknown: "Offline / unknown",
   nodesNeverReported: "{count} never reported",
 
+  // heart status tooltips (app/admin/nodes/health-heart.tsx)
+  heartTipOnline: "Online · daemon {version}",
+  heartTipDegraded: "Degraded · heartbeat delayed",
+  heartTipOffline: "Offline",
+  heartTipUnknown: "No heartbeat yet",
+  heartVersionUnknown: "unknown",
+
+  // panel + daemon version / update badges (update-panel.tsx, page.tsx)
+  updPanelChipTitle: "Panel version",
+  updDaemonChipTitle: "Daemon build shipped with this panel",
+  updDaemonChip: "daemon v{version}",
+  updUpdateAvailable: "Update available",
+  updUpdateAvailableBehind: "Update available · {count} behind",
+  updUpToDate: "Up to date",
+  updUpdateNow: "Update now",
+  updUpdating: "Updating…",
+  updNewVersion: "New version available — v{version}",
+
   // node list client (app/admin/nodes/node-list.tsx)
-  nlAutoRefresh: "Auto-refresh every {seconds}s",
   nlAddLocation: "Add location",
   nlEmptyTitle: "No nodes yet",
   nlEmptyDesc: "A node is a machine running the SPanel daemon. Add one to start deploying servers.",
@@ -912,6 +929,40 @@ const en = {
   scServicesHint: "Nests and eggs",
   scActivity: "Activity",
   scActivityHint: "Full audit log",
+
+  // node install & config (app/admin/nodes/[node]/node-configuration.tsx)
+  niConfigureTitle: "Configure this node",
+  niConfigureDesc:
+    "Point an already-installed daemon at this node. This only writes its configuration and restarts the service — it installs nothing.",
+  niTestConnection: "Test connection",
+  niRotateToken: "Rotate token",
+  niRotateConfirmTitle: "Rotate the daemon token?",
+  niRotateConfirmDesc: "The node will disconnect until its config is updated.",
+  niRotateConfirmCta: "Rotate token",
+  niConfigureIntro:
+    "Run this on the node as root (or with sudo). It writes /etc/spanel/config.yml with this node's panel URL, token and listen settings, then reloads systemd and restarts the daemon. The daemon itself is installed separately by the SPanel installer.",
+  niCopySetConfig: "Copy set-configuration command",
+  niTokenWarning:
+    "This command contains the node token. Anyone who has it can control every server on the node — keep it private.",
+  niConsoleHint: "When the daemon applies the config, the console prints",
+  niConfigSetSuccess: "Configuration set successfully",
+  niVerifyHint:
+    "Click Test connection once the daemon restarts to confirm the panel can reach this node.",
+  niServiceTitle: "Service control",
+  niServiceDesc: "Manage the daemon with systemd.",
+  niSvcEnable: "Enable the daemon and start it now (first boot / after install).",
+  niSvcRestart: "Restart after a configuration or token change.",
+  niSvcStatus: "Is the daemon running?",
+  niSvcStop: "Stop the daemon.",
+  niSvcLogs: "Show the last 120 log lines.",
+  niSvcDoctor: "Health check: Node, Docker, config, data directory and panel credentials.",
+  niConfigFileTitle: "What gets written to the node",
+  niConfigFileDesc:
+    "/etc/spanel/config.yml — exactly what the command above writes. Shown here so you can review it or set it up by hand.",
+  niStaysInSync: "stays in sync with this node",
+  niCopyConfig: "Copy configuration",
+  niConfigFileNote:
+    "The command above writes this verbatim. It always reflects this node's current panel URL, token pair, listen host/port and TLS settings.",
 } as const;
 
 const ar: Record<keyof typeof en, string> = {
@@ -981,8 +1032,25 @@ const ar: Record<keyof typeof en, string> = {
   nodesStatOfflineUnknown: "غير متصل / غير معروف",
   nodesNeverReported: "{count} لم تُبلّغ قط",
 
+  // heart status tooltips (app/admin/nodes/health-heart.tsx)
+  heartTipOnline: "متصل · الخدمة {version}",
+  heartTipDegraded: "متدهور · تأخّرت النبضة",
+  heartTipOffline: "غير متصل",
+  heartTipUnknown: "لا توجد نبضة بعد",
+  heartVersionUnknown: "غير معروف",
+
+  // panel + daemon version / update badges (update-panel.tsx, page.tsx)
+  updPanelChipTitle: "إصدار اللوحة",
+  updDaemonChipTitle: "إصدار الخدمة المرفق مع هذه اللوحة",
+  updDaemonChip: "الخدمة v{version}",
+  updUpdateAvailable: "يتوفر تحديث",
+  updUpdateAvailableBehind: "يتوفر تحديث · متأخّر بـ {count}",
+  updUpToDate: "محدّث",
+  updUpdateNow: "حدّث الآن",
+  updUpdating: "جارٍ التحديث…",
+  updNewVersion: "يتوفر إصدار جديد — v{version}",
+
   // node list client (app/admin/nodes/node-list.tsx)
-  nlAutoRefresh: "تحديث تلقائي كل {seconds} ثانية",
   nlAddLocation: "إضافة موقع",
   nlEmptyTitle: "لا توجد عُقد بعد",
   nlEmptyDesc: "العقدة جهاز يشغّل خدمة SPanel. أضف واحدة لبدء نشر الخوادم.",
@@ -1808,6 +1876,40 @@ const ar: Record<keyof typeof en, string> = {
   scServicesHint: "الأعشاش والبيضات",
   scActivity: "النشاط",
   scActivityHint: "سجل التدقيق الكامل",
+
+  // node install & config (app/admin/nodes/[node]/node-configuration.tsx)
+  niConfigureTitle: "إعداد هذه العقدة",
+  niConfigureDesc:
+    "وجِّه خدمةً مُثبَّتة مسبقاً إلى هذه العقدة. هذا يكتب إعدادها ويعيد تشغيل الخدمة فقط — ولا يُثبّت أي شيء.",
+  niTestConnection: "اختبار الاتصال",
+  niRotateToken: "تدوير الرمز",
+  niRotateConfirmTitle: "تدوير رمز الخدمة؟",
+  niRotateConfirmDesc: "ستنقطع العقدة عن الاتصال حتى يُحدَّث إعدادها.",
+  niRotateConfirmCta: "تدوير الرمز",
+  niConfigureIntro:
+    "شغّل هذا على العقدة كجذر (أو باستخدام sudo). يكتب ‎/etc/spanel/config.yml برابط اللوحة والرمز وإعدادات الاستماع لهذه العقدة، ثم يعيد تحميل systemd ويعيد تشغيل الخدمة. أما الخدمة نفسها فيُثبّتها مُثبِّت SPanel بشكل منفصل.",
+  niCopySetConfig: "نسخ أمر ضبط الإعداد",
+  niTokenWarning:
+    "يحتوي هذا الأمر على رمز العقدة. أي شخص يملكه يمكنه التحكم بكل خادم على العقدة — احتفظ به سرّياً.",
+  niConsoleHint: "عند تطبيق الخدمة للإعداد، تطبع وحدة التحكم",
+  niConfigSetSuccess: "تم ضبط الإعداد بنجاح",
+  niVerifyHint:
+    "انقر «اختبار الاتصال» بعد إعادة تشغيل الخدمة للتأكد من أن اللوحة تستطيع الوصول إلى هذه العقدة.",
+  niServiceTitle: "التحكم بالخدمة",
+  niServiceDesc: "أدِر الخدمة باستخدام systemd.",
+  niSvcEnable: "فعّل الخدمة وشغّلها الآن (عند أول إقلاع / بعد التثبيت).",
+  niSvcRestart: "أعد التشغيل بعد تغيير الإعداد أو الرمز.",
+  niSvcStatus: "هل الخدمة قيد التشغيل؟",
+  niSvcStop: "أوقف الخدمة.",
+  niSvcLogs: "اعرض آخر 120 سطراً من السجل.",
+  niSvcDoctor: "فحص السلامة: Node وDocker والإعداد ودليل البيانات وبيانات اعتماد اللوحة.",
+  niConfigFileTitle: "ما الذي يُكتب على العقدة",
+  niConfigFileDesc:
+    "‎/etc/spanel/config.yml — بالضبط ما يكتبه الأمر أعلاه. معروض هنا لتراجعه أو تضبطه يدوياً.",
+  niStaysInSync: "يبقى متزامناً مع هذه العقدة",
+  niCopyConfig: "نسخ الإعداد",
+  niConfigFileNote:
+    "يكتب الأمر أعلاه هذا حرفياً. وهو يعكس دائماً رابط اللوحة الحالي وزوج الرمز ومضيف/منفذ الاستماع وإعدادات TLS لهذه العقدة.",
 };
 
 export const admin: Record<Locale, Record<keyof typeof en, string>> = { en, ar };
