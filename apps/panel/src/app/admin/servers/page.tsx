@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db";
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import { requirePermission } from "@/lib/auth/session";
 import { PageHeader } from "@/components/layout/page-header";
 import { connectionAddress } from "@/lib/services/network";
@@ -50,6 +52,12 @@ export default async function AdminServersPage() {
       <PageHeader
         title={t("admin.serversTitle")}
         description={t("admin.serversDesc")}
+        actions={
+          <Link href="/admin/servers/new" className="btn btn-primary">
+            <Plus className="size-4" />
+            Create server
+          </Link>
+        }
       />
       <AdminServerTable
         users={users}

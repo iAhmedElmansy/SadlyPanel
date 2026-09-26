@@ -57,6 +57,9 @@ model User {
   emailVerifiedAt DateTime?
   // Optional subscription plan assigned to the user. SetNull keeps users when a plan is removed.
   planId        Int?
+  // Pay-then-activate subscription lifecycle. Both are set on plan activation.
+  planExpiresAt DateTime?   // null = no expiry / lifetime; set on plan activation
+  planActivatedAt DateTime?
   lastLoginAt   DateTime?
   lastLoginIp   String?
   createdAt     DateTime  @default(now())
@@ -75,6 +78,8 @@ model User {
   tickets       Ticket[]        @relation("TicketOwner")
   assignedTickets Ticket[]      @relation("TicketAssignee")
   ticketMessages TicketMessage[]
+  paymentOrders    PaymentOrder[] @relation("PaymentBuyer")
+  reviewedPayments PaymentOrder[] @relation("PaymentReviewer")
 
   @@index([role])
   @@index([planId])
@@ -180,6 +185,10 @@ model Node {
   scheme             String   @default("https") // http | https
   behindProxy        Boolean  @default(false)
   maintenanceMode    Boolean  @default(false)
+  // Minimum plan (tier) required to use this node. null = available to all plans.
+  // Mirrors Package.requiredPlan: a user qualifies when their plan.sortOrder <=
+  // requiredPlan.sortOrder (lower sortOrder = higher tier). See services/entitlements.ts.
+  requiredPlanId     Int?
   // Resource pool (MiB / MiB / % cpu)
   memory             Int      @default(8192)
   memoryOverallocate Int      @default(0)
@@ -216,6 +225,7 @@ model Node {
   updatedAt          DateTime @updatedAt
 
   location    Location?    @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  requiredPlan Plan?       @relation("NodeRequiredPlan", fields: [requiredPlanId], references: [id], onDelete: SetNull)
   allocations Allocation[]
   servers     Server[]
   domains     Domain[]
@@ -225,6 +235,7 @@ model Node {
 
   @@index([locationId])
   @@index([heartbeatStatus])
+  @@index([requiredPlanId])
   @@map("nodes")
 }
 
@@ -444,9 +455,11 @@ model Plan {
 
   packages           Package[]
   requiredByPackages Package[]     @relation("PackageRequiredPlan")
+  requiredByNodes    Node[]        @relation("NodeRequiredPlan")
   servers            Server[]
   users              User[]
   availablePackages  PlanPackage[]
+  paymentOrders      PaymentOrder[]
 
   @@map("plans")
 }
@@ -497,6 +510,49 @@ model PlanPackage {
   @@unique([planId, packageId])
   @@index([packageId])
   @@map("plan_packages")
+}
+
+// ---------------------------------------------------------------------------
+// Payments: automated gateways + manual Vodafone Cash review
+// ---------------------------------------------------------------------------
+
+/// A single purchase/activation attempt for a Plan. Covers the automated
+/// gateways (Paymob, Stripe, PayPal) and the manual Vodafone Cash flow (receipt
+/// upload + admin review). Gateway credentials are NOT stored here — they live
+/// in the Setting key/value table (encrypted flag) under these runtime keys:
+///   payments.<method>.enabled
+///   payments.paymob.apiKey / .integrationId / .hmac
+///   payments.stripe.secretKey / .webhookSecret / .publishableKey
+///   payments.paypal.clientId / .clientSecret / .mode
+///   payments.vodafone_cash.enabled / .phone / .instructions
+model PaymentOrder {
+  id              Int       @id @default(autoincrement())
+  uuid            String    @unique
+  userId          Int
+  planId          Int
+  method          String // paymob | stripe | paypal | vodafone_cash
+  amountCents     Int
+  currency        String    @default("EGP")
+  status          String    @default("pending") // pending | awaiting_review | paid | activated | rejected | failed | cancelled
+  gatewayRef      String? // provider transaction/session id
+  proofImagePath  String? // Vodafone Cash receipt upload (relative path)
+  senderPhone     String? // Vodafone Cash sender number (optional)
+  rejectionReason String? // optional reason when an admin rejects a manual request
+  reviewedById    Int?
+  reviewedAt      DateTime?
+  periodStart     DateTime?
+  periodEnd       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user     User  @relation("PaymentBuyer", fields: [userId], references: [id], onDelete: Cascade)
+  reviewer User? @relation("PaymentReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  plan     Plan  @relation(fields: [planId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([status])
+  @@index([planId])
+  @@map("payment_orders")
 }
 
 // ---------------------------------------------------------------------------

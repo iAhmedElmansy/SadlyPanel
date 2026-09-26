@@ -14,7 +14,7 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { HealthHeart, heartTitle } from "../health-heart";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Activity } from "lucide-react";
 import { formatMib, formatUptime, relativeTime } from "@/lib/utils";
@@ -50,14 +50,6 @@ export interface TelemetryLatest {
   totalServers: number;
   uptimeSeconds: number;
 }
-
-const HEALTH_TONE = { online: "ok", degraded: "warn", offline: "bad", unknown: "neutral" } as const;
-const HEALTH_KEY = {
-  online: "admin.healthOnline",
-  degraded: "admin.healthDegraded",
-  offline: "admin.healthOffline",
-  unknown: "admin.healthUnknown",
-} as const;
 
 const AXIS = { stroke: "#6c6c72", fontSize: 10 };
 const GRID = "#26262a";
@@ -133,7 +125,7 @@ export function NodeTelemetry({
           description={t("admin.telHealthDesc")}
           action={
             <span className="flex items-center gap-2">
-              <Badge tone={HEALTH_TONE[health]}>{t(HEALTH_KEY[health])}</Badge>
+              <HealthHeart health={health} title={heartTitle(health, daemonVersion)} size="size-5" />
               <span className="text-xs text-ink-dim">{relativeTime(lastHeartbeatAt)}</span>
             </span>
           }

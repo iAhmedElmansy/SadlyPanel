@@ -234,14 +234,33 @@ ensure_node() {
 fetch_source() {
   if [[ -d "$INSTALL_DIR/.git" ]]; then
     log "Updating SPanel in $INSTALL_DIR…"
-    # `reset --hard` below only touches tracked files, so .env, dev.db and
-    # server volumes (all gitignored) survive an update untouched.
     git -C "$INSTALL_DIR" remote set-url origin "$REPO_URL" 2>/dev/null || \
       git -C "$INSTALL_DIR" remote add origin "$REPO_URL"
-    git -C "$INSTALL_DIR" fetch --depth 1 origin "$REPO_BRANCH" >/dev/null 2>&1 || \
-      die "Could not reach $REPO_URL. Check the server's network and DNS."
-    git -C "$INSTALL_DIR" reset --hard "origin/$REPO_BRANCH" >/dev/null 2>&1 || \
-      die "Could not check out origin/$REPO_BRANCH."
+    # Deepen a shallow clone once so fast-forward + file diffing have history.
+    if [[ "$(git -C "$INSTALL_DIR" rev-parse --is-shallow-repository 2>/dev/null)" == "true" ]]; then
+      git -C "$INSTALL_DIR" fetch --unshallow origin "$REPO_BRANCH" >/dev/null 2>&1 || \
+        git -C "$INSTALL_DIR" fetch origin "$REPO_BRANCH" >/dev/null 2>&1 || \
+        die "Could not reach $REPO_URL. Check the server's network and DNS."
+    else
+      git -C "$INSTALL_DIR" fetch origin "$REPO_BRANCH" >/dev/null 2>&1 || \
+        die "Could not reach $REPO_URL. Check the server's network and DNS."
+    fi
+
+    UPDATE_OLD_REV="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+    # Fast-forward only — never `reset --hard` over local commits or edits, so a
+    # customised checkout is reported instead of being silently clobbered.
+    if ! git -C "$INSTALL_DIR" merge --ff-only "origin/$REPO_BRANCH" >/dev/null 2>&1; then
+      die "Cannot fast-forward $INSTALL_DIR to origin/$REPO_BRANCH.
+      This usually means local commits or uncommitted changes to tracked files.
+      Inspect with:  git -C $INSTALL_DIR status
+      Nothing was changed."
+    fi
+    UPDATE_NEW_REV="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo "")"
+    if [[ -n "$UPDATE_OLD_REV" && "$UPDATE_OLD_REV" != "$UPDATE_NEW_REV" ]]; then
+      CHANGED_FILES="$(git -C "$INSTALL_DIR" diff --name-only "$UPDATE_OLD_REV" "$UPDATE_NEW_REV" 2>/dev/null)"
+    else
+      CHANGED_FILES=""
+    fi
     ok "Source updated ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))."
     return
   fi
@@ -255,6 +274,7 @@ fetch_source() {
   mkdir -p "$(dirname "$INSTALL_DIR")"
   git clone --depth 1 --branch "$REPO_BRANCH" "$REPO_URL" "$INSTALL_DIR" >/dev/null 2>&1 || \
     die "Clone failed from $REPO_URL (branch $REPO_BRANCH). Check the server's network and DNS."
+  CHANGED_FILES="__ALL__"
   ok "Source downloaded ($(git -C "$INSTALL_DIR" rev-parse --short HEAD))."
 }
 
@@ -299,13 +319,40 @@ hand_off() {
 # when both the panel and the daemon are being rebuilt, guarded by
 # SOURCE_PREPARED so a "both" update doesn't fetch and npm-install twice.
 SOURCE_PREPARED=false
+# Populated by fetch_source on an update: the newline-separated list of files
+# that changed between the old and new HEAD. "__ALL__" means a fresh checkout
+# (rebuild everything); empty means nothing changed.
+CHANGED_FILES="__ALL__"
+UPDATE_OLD_REV=""
+UPDATE_NEW_REV=""
+
+# --- incremental-update predicates -----------------------------------------
+# true when a full rebuild is warranted (fresh clone) or a path under $1 changed.
+source_changed() {
+  [[ "$CHANGED_FILES" == "__ALL__" ]] && return 0
+  [[ -n "$CHANGED_FILES" ]] && grep -q "^$1" <<<"$CHANGED_FILES"
+}
+# true when dependencies changed (any package.json or the lockfile) — a rebuild
+# of both components is then warranted even if only shared deps moved.
+source_changed_deps() {
+  [[ "$CHANGED_FILES" == "__ALL__" ]] && return 0
+  [[ -n "$CHANGED_FILES" ]] && grep -qE '(^|/)package(-lock)?\.json$' <<<"$CHANGED_FILES"
+}
+# true when the update changed nothing at all.
+update_is_noop() {
+  [[ "$CHANGED_FILES" != "__ALL__" && -z "$CHANGED_FILES" ]]
+}
 
 prepare_source() {
   if $SOURCE_PREPARED; then return; fi
   fetch_source
-  log "Installing dependencies…"
-  ( cd "$INSTALL_DIR" && npm install --no-audit --no-fund ) || die "npm install failed."
-  ok "Dependencies installed."
+  if source_changed_deps; then
+    log "Installing dependencies (lockfile or a package.json changed)…"
+    ( cd "$INSTALL_DIR" && npm install --no-audit --no-fund ) || die "npm install failed."
+    ok "Dependencies installed."
+  else
+    ok "Dependencies unchanged; skipping npm install."
+  fi
   SOURCE_PREPARED=true
 }
 
@@ -365,15 +412,35 @@ do_update() {
 
   prepare_source
 
-  if $panel_installed; then rebuild_panel; fi
-  if $daemon_installed; then rebuild_daemon; fi
+  if update_is_noop; then
+    install_wrapper
+    echo ""
+    ok "Already up to date ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)); nothing to rebuild."
+    echo ""
+    return
+  fi
+
+  local build_panel=false build_daemon=false
+  if $panel_installed && { source_changed "apps/panel/" || source_changed_deps; }; then build_panel=true; fi
+  if $daemon_installed && { source_changed "apps/daemon/" || source_changed_deps; }; then build_daemon=true; fi
+
+  if ! $build_panel && ! $build_daemon; then
+    install_wrapper
+    echo ""
+    ok "Updated to $(git -C "$INSTALL_DIR" rev-parse --short HEAD); no panel/daemon code changed, so no rebuild or restart was needed."
+    echo ""
+    return
+  fi
+
+  $build_panel && rebuild_panel
+  $build_daemon && rebuild_daemon
 
   install_wrapper
 
   echo ""
-  log "Restarting services…"
-  if $panel_installed; then restart_service panel; fi
-  if $daemon_installed; then restart_service daemon; fi
+  log "Restarting updated services…"
+  $build_panel && restart_service panel
+  $build_daemon && restart_service daemon
 
   echo ""
   ok "Update complete."
@@ -392,6 +459,15 @@ do_update_panel() {
   echo ""
 
   prepare_source
+
+  if ! source_changed "apps/panel/" && ! source_changed_deps; then
+    install_wrapper
+    echo ""
+    ok "Panel already up to date ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)); nothing to rebuild."
+    echo ""
+    return
+  fi
+
   rebuild_panel
   install_wrapper
 
@@ -416,6 +492,15 @@ do_update_daemon() {
   echo ""
 
   prepare_source
+
+  if ! source_changed "apps/daemon/" && ! source_changed_deps; then
+    install_wrapper
+    echo ""
+    ok "Daemon already up to date ($(git -C "$INSTALL_DIR" rev-parse --short HEAD)); nothing to rebuild."
+    echo ""
+    return
+  fi
+
   rebuild_daemon
   install_wrapper
 

@@ -260,6 +260,40 @@ export async function provisionServer(input: ProvisionContext): Promise<Provisio
   return { serverId: created.id, uuid: created.uuid, uuidShort: created.uuidShort, hostname, daemonQueued, daemonError };
 }
 
+/**
+ * Auto-selects `count` free ports on a node for self-service creation, so the
+ * user wizard never has to expose (or let the customer pick) raw IP:port
+ * allocations. Ports are chosen at random from the node's unassigned pool; the
+ * first becomes the primary. The returned ids are re-validated and reserved
+ * inside {@link provisionServer}'s transaction, so the small window between
+ * picking and reserving is harmless (a racing claim just fails the capacity
+ * check and the user retries).
+ */
+export async function pickFreeAllocations(
+  nodeId: number,
+  count: number,
+): Promise<{ allocationId: number; additionalAllocationIds: number[] }> {
+  const needed = Math.max(1, Math.floor(count) || 1);
+  const free = await prisma.allocation.findMany({
+    where: { nodeId, serverId: null },
+    select: { id: true },
+    take: 500,
+  });
+  if (free.length < needed) {
+    throw new ProvisionError(
+      `This node doesn't have ${needed} free port${needed === 1 ? "" : "s"} available right now. Try another node or fewer ports.`,
+    );
+  }
+  // Fisher–Yates shuffle so we don't always hand out the lowest ports.
+  for (let i = free.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [free[i], free[j]] = [free[j], free[i]];
+  }
+  const picked = free.slice(0, needed).map((a) => a.id);
+  const [allocationId, ...additionalAllocationIds] = picked;
+  return { allocationId, additionalAllocationIds };
+}
+
 /** Frees every resource tied to a server, then removes it from the node. */
 export async function deleteServer(serverId: number, actingUserId: number): Promise<{ daemonError?: string }> {
   const server = await prisma.server.findUnique({

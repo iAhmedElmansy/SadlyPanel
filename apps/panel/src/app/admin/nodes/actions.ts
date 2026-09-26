@@ -41,6 +41,18 @@ function parseNodeForm(formData: FormData) {
   });
 }
 
+/**
+ * Optional plan-gating field. Kept out of the shared `nodeSchema` (owned
+ * elsewhere): read straight off the form and coerce an empty value to null,
+ * otherwise a positive Int. Anything else is treated as "no restriction".
+ */
+function parseRequiredPlanId(formData: FormData): number | null {
+  const raw = formData.get("requiredPlanId");
+  if (raw == null || raw === "") return null;
+  const id = Number(raw);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}
+
 export async function createNodeAction(_prev: NodeState, formData: FormData): Promise<NodeState> {
   const admin = await requireAdmin();
   const parsed = parseNodeForm(formData);
@@ -59,6 +71,7 @@ export async function createNodeAction(_prev: NodeState, formData: FormData): Pr
       ...parsed.data,
       description: parsed.data.description ?? null,
       locationId: parsed.data.locationId ?? null,
+      requiredPlanId: parseRequiredPlanId(formData),
       uuid: uuid(),
       daemonTokenId: randomHex(8),
       daemonToken: encrypt(token),
@@ -91,6 +104,7 @@ export async function updateNodeAction(_prev: NodeState, formData: FormData): Pr
       ...parsed.data,
       description: parsed.data.description ?? null,
       locationId: parsed.data.locationId ?? null,
+      requiredPlanId: parseRequiredPlanId(formData),
     },
   });
 

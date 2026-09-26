@@ -35,7 +35,7 @@ export default async function NodeOverviewPage({ params }: { params: Promise<{ n
 
   return (
     <>
-      <LiveRefresh intervalMs={15000} />
+      <LiveRefresh intervalMs={1000} />
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label={t("admin.nodeOvServers")} value={capacity.servers} />

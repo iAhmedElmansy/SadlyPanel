@@ -88,3 +88,82 @@ export async function assertNodeHasCapacity(nodeId: number, req: CapacityRequest
     throw new Error(`Node "${node.name}" has only ${limitCpu - usedCpu}% CPU left (requested ${req.cpu}%).`);
   }
 }
+
+/**
+ * A node's remaining headroom, expressed as percentages used per dimension plus
+ * the absolute free amounts. `*Unlimited` is true when the operator set the
+ * matching overallocation to -1 (treat as unbounded). `free*` is
+ * Number.POSITIVE_INFINITY for unlimited dimensions — callers rendering to the
+ * client should map that to null.
+ */
+export interface NodeCapacitySummary {
+  percentMemory: number;
+  percentDisk: number;
+  percentCpu: number;
+  freeMemory: number;
+  freeDisk: number;
+  freeCpu: number;
+  freeAllocations: number;
+  memoryUnlimited: boolean;
+  diskUnlimited: boolean;
+  cpuUnlimited: boolean;
+}
+
+export async function getNodeCapacitySummary(nodeId: number): Promise<NodeCapacitySummary> {
+  const [cap, node] = await Promise.all([
+    getNodeCapacity(nodeId),
+    prisma.node.findUniqueOrThrow({
+      where: { id: nodeId },
+      select: { memoryOverallocate: true, diskOverallocate: true, cpuOverallocate: true },
+    }),
+  ]);
+
+  const dim = (used: number, limit: number, over: number) => {
+    const unlimited = over === -1;
+    const free = unlimited ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
+    const percent = unlimited || limit <= 0 ? 0 : Math.min(100, Math.max(0, Math.round((used / limit) * 100)));
+    return { free, percent, unlimited };
+  };
+
+  const m = dim(cap.memory.used, cap.memory.overallocated, node.memoryOverallocate);
+  const d = dim(cap.disk.used, cap.disk.overallocated, node.diskOverallocate);
+  const c = dim(cap.cpu.used, cap.cpu.overallocated, node.cpuOverallocate);
+
+  return {
+    percentMemory: m.percent,
+    percentDisk: d.percent,
+    percentCpu: c.percent,
+    freeMemory: m.free,
+    freeDisk: d.free,
+    freeCpu: c.free,
+    freeAllocations: cap.allocations.free,
+    memoryUnlimited: m.unlimited,
+    diskUnlimited: d.unlimited,
+    cpuUnlimited: c.unlimited,
+  };
+}
+
+/**
+ * How many MORE servers of the given plan shape fit on a node, limited by the
+ * tightest of memory / disk / cpu / free port allocations. Unlimited dimensions
+ * (overallocate -1) and non-positive plan limits are skipped. Free allocations
+ * always bound the result, since every server needs at least one port. Never
+ * negative.
+ */
+export async function getNodeServerHeadroom(
+  nodeId: number,
+  planLimits: { memory: number; disk: number; cpu: number; allocations?: number },
+): Promise<number> {
+  const s = await getNodeCapacitySummary(nodeId);
+  const candidates: number[] = [];
+
+  if (planLimits.memory > 0 && !s.memoryUnlimited) candidates.push(Math.floor(s.freeMemory / planLimits.memory));
+  if (planLimits.disk > 0 && !s.diskUnlimited) candidates.push(Math.floor(s.freeDisk / planLimits.disk));
+  if (planLimits.cpu > 0 && !s.cpuUnlimited) candidates.push(Math.floor(s.freeCpu / planLimits.cpu));
+
+  const portsPerServer = planLimits.allocations && planLimits.allocations > 0 ? planLimits.allocations : 1;
+  candidates.push(Math.floor(s.freeAllocations / portsPerServer));
+
+  if (candidates.length === 0) return Number.POSITIVE_INFINITY;
+  return Math.max(0, Math.min(...candidates));
+}

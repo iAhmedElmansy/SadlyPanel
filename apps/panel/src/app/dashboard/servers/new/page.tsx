@@ -1,86 +1,99 @@
 import type { Metadata } from "next";
+import Link from "next/link";
+import { ArrowRight, Sparkles } from "lucide-react";
 import { requireUser } from "@/lib/auth/session";
-import { getT } from "@/lib/i18n/server";
 import { prisma } from "@/lib/db";
 import { PageHeader } from "@/components/layout/page-header";
-import { getNodeCapacity } from "@/lib/services/capacity";
-import { getAvailablePackagesForUser } from "@/lib/services/entitlements";
-import { CreateServerWizard, type WizardNode, type WizardPackage } from "./wizard";
+import { EmptyState } from "@/components/ui/empty-state";
+import { getNodeCapacitySummary, getNodeServerHeadroom } from "@/lib/services/capacity";
+import { getUserPlan, planSatisfiesNode } from "@/lib/services/entitlements";
+import { UserServerWizard, type UserWizardNode } from "./wizard";
 
 export const metadata: Metadata = { title: "Create server" };
 export const dynamic = "force-dynamic";
 
-export default async function NewServerPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ package?: string }>;
-}) {
+/**
+ * Self-service server creation. Users only pick a service, a location and how
+ * much of their plan to use — raw allocations, docker images and node internals
+ * stay hidden. A plan is required; without one we send them to Billing.
+ */
+export default async function NewServerPage() {
   const user = await requireUser();
-  const t = await getT();
-  const isAdmin = user.role === "admin";
-  const { package: packageParam } = await searchParams;
+  const plan = await getUserPlan(user.id);
 
-  const [nodeRows, eggRows, allocationRows, domainRows] = await Promise.all([
-    prisma.node.findMany({
-      where: isAdmin ? {} : { public: true, maintenanceMode: false },
-      orderBy: { name: "asc" },
-    }),
+  if (!plan) {
+    return (
+      <>
+        <PageHeader title="Create a server" description="Deploy a game, app or website in a couple of clicks." />
+        <div className="panel-card">
+          <EmptyState
+            icon={<Sparkles className="size-5" />}
+            title="Choose a plan to get started"
+            description="Servers are deployed from your subscription. Pick a plan and you'll be able to create servers right away."
+            action={
+              <Link href="/dashboard/billing" className="btn btn-primary">
+                View plans
+                <ArrowRight className="size-4" />
+              </Link>
+            }
+          />
+        </div>
+      </>
+    );
+  }
+
+  const [eggRows, nodeRows] = await Promise.all([
     prisma.egg.findMany({
       include: { nest: { select: { name: true } }, variables: { orderBy: { sortOrder: "asc" } } },
       orderBy: [{ nestId: "asc" }, { sortOrder: "asc" }, { name: "asc" }],
     }),
-    prisma.allocation.findMany({
-      where: { serverId: null },
-      orderBy: [{ nodeId: "asc" }, { port: "asc" }],
-      take: 500,
+    prisma.node.findMany({
+      where: { public: true },
+      include: { requiredPlan: { select: { name: true, sortOrder: true } } },
+      orderBy: { name: "asc" },
     }),
-    prisma.domain.findMany({ where: { isPublic: true }, orderBy: { name: "asc" } }),
   ]);
 
-  // Entitlements annotate each package with lock state for this user. Clients
-  // only see public packages (locked ones are shown disabled); admins see all.
-  const entitlements = await getAvailablePackagesForUser(user);
-  const visible = isAdmin ? entitlements : entitlements.filter((entry) => entry.package.isPublic);
-  const planIds = [...new Set(visible.map((entry) => entry.package.planId).filter((id): id is number => id !== null))];
-  const planRows = await prisma.plan.findMany({ where: { id: { in: planIds } } });
-  const planMap = new Map(planRows.map((plan) => [plan.id, plan]));
+  const planShape = { id: plan.id, sortOrder: plan.sortOrder };
 
-  // Preselect a package from ?package=. It must be a visible, non-locked
-  // entitlement; anything missing/invalid/locked falls back to 0 (no preselect).
-  const parsedPackageId = Number(packageParam);
-  const initialPackageId =
-    Number.isInteger(parsedPackageId) &&
-    parsedPackageId > 0 &&
-    visible.some((entry) => entry.package.id === parsedPackageId && !entry.locked)
-      ? parsedPackageId
-      : 0;
-
-  const nodes: WizardNode[] = await Promise.all(
+  const nodes: UserWizardNode[] = await Promise.all(
     nodeRows.map(async (node) => {
-      const capacity = await getNodeCapacity(node.id);
+      const [summary, headroom] = await Promise.all([
+        getNodeCapacitySummary(node.id),
+        getNodeServerHeadroom(node.id, { memory: plan.memory, disk: plan.disk, cpu: plan.cpu, allocations: 1 }),
+      ]);
       return {
         id: node.id,
         name: node.name,
-        fqdn: node.fqdn,
-        maintenanceMode: node.maintenanceMode,
-        free: {
-          memory: Math.max(0, capacity.memory.overallocated - capacity.memory.used),
-          disk: Math.max(0, capacity.disk.overallocated - capacity.disk.used),
-          cpu: Math.max(0, capacity.cpu.overallocated - capacity.cpu.used),
-        },
+        percentMemory: summary.percentMemory,
+        percentDisk: summary.percentDisk,
+        percentCpu: summary.percentCpu,
+        // Infinity isn't serializable across the RSC boundary — map to null.
+        headroom: Number.isFinite(headroom) ? headroom : null,
+        freePorts: summary.freeAllocations,
+        planLocked: !planSatisfiesNode(
+          { requiredPlanId: node.requiredPlanId, requiredPlan: node.requiredPlan },
+          planShape,
+        ),
+        requiredPlanName: node.requiredPlan?.name ?? null,
+        maintenance: node.maintenanceMode,
       };
     }),
   );
 
   return (
     <>
-      <PageHeader
-        title={t("dashboard.serversNewTitle")}
-        description={t("dashboard.serversNewDescription")}
-      />
-      <CreateServerWizard
-        isAdmin={isAdmin}
-        initialPackageId={initialPackageId}
+      <PageHeader title="Create a server" description="Deploy a game, app or website in a couple of clicks." />
+      <UserServerWizard
+        plan={{
+          name: plan.name,
+          memory: plan.memory,
+          disk: plan.disk,
+          cpu: plan.cpu,
+          allocationLimit: plan.allocationLimit,
+          databaseLimit: plan.databaseLimit,
+          backupLimit: plan.backupLimit,
+        }}
         nodes={nodes}
         eggs={eggRows.map((egg) => ({
           id: egg.id,
@@ -88,7 +101,6 @@ export default async function NewServerPage({
           description: egg.description,
           kind: egg.kind,
           nestName: egg.nest.name,
-          dockerImages: egg.dockerImages,
           variables: egg.variables.map((variable) => ({
             id: variable.id,
             name: variable.name,
@@ -99,40 +111,6 @@ export default async function NewServerPage({
             userViewable: variable.userViewable,
           })),
         }))}
-        allocations={allocationRows.map((allocation) => ({
-          id: allocation.id,
-          ip: allocation.ip,
-          ipAlias: allocation.ipAlias,
-          port: allocation.port,
-          nodeId: allocation.nodeId,
-        }))}
-        domains={domainRows.map((domain) => ({ id: domain.id, name: domain.name }))}
-        packages={visible.map<WizardPackage>(({ package: pkg, locked, requiredPlanName }) => {
-          const plan = pkg.planId !== null ? planMap.get(pkg.planId) : undefined;
-          return {
-            id: pkg.id,
-            name: pkg.name,
-            description: pkg.description,
-            planId: pkg.planId,
-            eggId: pkg.eggId,
-            locked,
-            requiredPlanName: requiredPlanName ?? null,
-            limits: plan
-              ? {
-                  memory: plan.memory,
-                  swap: plan.swap,
-                  disk: plan.disk,
-                  io: plan.io,
-                  cpu: plan.cpu,
-                  threads: plan.threads,
-                  oomKiller: plan.oomKiller,
-                  databaseLimit: plan.databaseLimit,
-                  allocationLimit: plan.allocationLimit,
-                  backupLimit: plan.backupLimit,
-                }
-              : null,
-          };
-        })}
       />
     </>
   );

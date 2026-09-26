@@ -5,6 +5,7 @@ import { healthOf, nodeHealthSummary, refreshNodeHealth } from "@/lib/services/h
 import { PageHeader, StatCard } from "@/components/layout/page-header";
 import { NodeList, type NodeRow } from "./node-list";
 import { getT } from "@/lib/i18n/server";
+import { panelVersion } from "@/lib/version";
 
 export async function generateMetadata() {
   const t = await getT();
@@ -20,9 +21,10 @@ export default async function AdminNodesPage() {
   // not reported as online for ever.
   await refreshNodeHealth().catch(() => undefined);
 
-  const [nodeRows, locations, health] = await Promise.all([
+  const [nodeRows, locations, plans, health] = await Promise.all([
     prisma.node.findMany({ include: { location: true }, orderBy: { name: "asc" } }),
     prisma.location.findMany({ orderBy: { shortCode: "asc" } }),
+    prisma.plan.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
     nodeHealthSummary(),
   ]);
 
@@ -72,6 +74,14 @@ export default async function AdminNodesPage() {
       <PageHeader
         title={t("admin.nodesTitle")}
         description={t("admin.nodesDesc")}
+        actions={
+          <span
+            className="badge border-line bg-surface-2 font-mono text-[11px] text-ink-muted"
+            title="Panel version"
+          >
+            v{panelVersion()}
+          </span>
+        }
       />
 
       {nodes.length > 0 ? (
@@ -88,7 +98,11 @@ export default async function AdminNodesPage() {
         </div>
       ) : null}
 
-      <NodeList nodes={nodes} locations={locations.map((l) => ({ id: l.id, name: l.name, shortCode: l.shortCode }))} />
+      <NodeList
+        nodes={nodes}
+        locations={locations.map((l) => ({ id: l.id, name: l.name, shortCode: l.shortCode }))}
+        plans={plans}
+      />
     </>
   );
 }

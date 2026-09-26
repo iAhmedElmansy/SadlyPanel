@@ -9,7 +9,7 @@ import { useRouter } from "next/navigation";
  * `force-dynamic`, so router.refresh() re-runs the server components against
  * the database.
  */
-export function LiveRefresh({ intervalMs = 15000 }: { intervalMs?: number }) {
+export function LiveRefresh({ intervalMs = 1000 }: { intervalMs?: number }) {
   const router = useRouter();
 
   useEffect(() => {

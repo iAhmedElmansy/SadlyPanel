@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -5,7 +6,6 @@ import {
   Database,
   Globe2,
   HardDrive,
-  Network,
   Server,
   Settings,
   ShieldCheck,
@@ -24,6 +24,8 @@ import { Meter } from "@/components/ui/meter";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { formatMib, relativeTime } from "@/lib/utils";
 import { getT } from "@/lib/i18n/server";
+import { panelVersion, checkForUpdates } from "@/lib/version";
+import { PanelVersionBadge } from "./nodes/update-panel";
 
 export async function generateMetadata() {
   const t = await getT();
@@ -35,7 +37,6 @@ const SHORTCUTS = [
   { href: "/admin/settings", labelKey: "admin.scSettings", icon: Settings, hintKey: "admin.scSettingsHint" },
   { href: "/admin/users", labelKey: "admin.scUsers", icon: Users, hintKey: "admin.scUsersHint" },
   { href: "/admin/nodes", labelKey: "admin.scNodes", icon: HardDrive, hintKey: "admin.scNodesHint" },
-  { href: "/admin/allocations", labelKey: "admin.scPorts", icon: Network, hintKey: "admin.scPortsHint" },
   { href: "/admin/domains", labelKey: "admin.scDomains", icon: Globe2, hintKey: "admin.scDomainsHint" },
   { href: "/admin/databases", labelKey: "admin.scDbHosts", icon: Database, hintKey: "admin.scDbHostsHint" },
   { href: "/admin/servers", labelKey: "admin.scServers", icon: Server, hintKey: "admin.scServersHint" },
@@ -50,6 +51,17 @@ const NODE_HEALTH_KEY = {
   offline: "admin.healthOffline",
   unknown: "admin.healthUnknown",
 } as const;
+
+/**
+ * Streams the git-based update status into the header without blocking the
+ * dashboard: `checkForUpdates()` runs a `git fetch` (up to a 10s timeout), so it
+ * renders inside <Suspense> and the page paints immediately with just the
+ * version chip as the fallback.
+ */
+async function UpdateStatusBadge() {
+  const status = await checkForUpdates();
+  return <PanelVersionBadge status={status} panelVersion={panelVersion()} />;
+}
 
 export default async function AdminOverviewPage({
   searchParams,
@@ -104,7 +116,7 @@ export default async function AdminOverviewPage({
   const setupSteps = [
     { done: nodeRows.length > 0, label: t("admin.overviewStepNode"), href: "/admin/nodes" },
     { done: health.online > 0, label: t("admin.overviewStepDaemon"), href: "/admin/nodes" },
-    { done: totals.freePorts > 0, label: t("admin.overviewStepPorts"), href: "/admin/allocations" },
+    { done: totals.freePorts > 0, label: t("admin.overviewStepPorts"), href: "/admin/nodes" },
     { done: domains > 0, label: t("admin.overviewStepDomain"), href: "/admin/domains" },
     { done: dbHosts > 0, label: t("admin.overviewStepDbHost"), href: "/admin/databases" },
     { done: eggs > 0, label: t("admin.overviewStepEggs"), href: "/admin/eggs" },
@@ -117,9 +129,20 @@ export default async function AdminOverviewPage({
         title={t("admin.overviewTitle")}
         description={t("admin.overviewDesc")}
         actions={
-          <span className="badge border-brand/40 bg-brand/12 text-brand-soft">
-            <ShieldCheck className="size-3" />
-            {t("admin.overviewAdministrator")}
+          <span className="flex flex-wrap items-center gap-2">
+            <Suspense
+              fallback={
+                <span className="badge border-line bg-surface-2 font-mono text-[11px] text-ink-muted">
+                  v{panelVersion()}
+                </span>
+              }
+            >
+              <UpdateStatusBadge />
+            </Suspense>
+            <span className="badge border-brand/40 bg-brand/12 text-brand-soft">
+              <ShieldCheck className="size-3" />
+              {t("admin.overviewAdministrator")}
+            </span>
           </span>
         }
       />

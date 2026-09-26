@@ -25,6 +25,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { VERSION } from "./version.js";
 
 const CONFIG_PATH = "/etc/spanel/config.yml";
 const VHOSTS_DIR = "/etc/spanel/vhosts";
@@ -324,7 +325,10 @@ function ensureUserAndDirectories(dataDir: string): void {
   for (const dir of [dataDir, `${dataDir}/.archives`, `${dataDir}/.backups`, VHOSTS_DIR, LOG_DIR, "/tmp/spanel"]) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  shell(`chown -R spanel:spanel ${dataDir} ${LOG_DIR}`, { allowFailure: true });
+  // /tmp/spanel is the egg install-script scratch root and MUST be owned by the
+  // service user, or installs fail with EACCES when the daemon (User=spanel)
+  // tries to create install-<uuid> subdirectories inside a root-owned dir.
+  shell(`chown -R spanel:spanel ${dataDir} ${LOG_DIR} /tmp/spanel`, { allowFailure: true });
   shell("chmod 750 /etc/spanel", { allowFailure: true });
   ok(`Data directory ready at ${dataDir}.`);
 }
@@ -447,6 +451,10 @@ async function commandConfigure(flags: Record<string, string | boolean>): Promis
   const summary = readConfigSummary(contents);
   fs.mkdirSync(summary.data, { recursive: true });
   shell(`chown -R spanel:spanel ${summary.data} 2>/dev/null || true`, { allowFailure: true });
+
+  // The install page's configure-only command keys off this exact phrase in the
+  // daemon's console output to confirm success — keep the wording stable.
+  ok("Daemon configuration set successfully.");
 }
 
 async function commandInstall(flags: Record<string, string | boolean>): Promise<void> {
@@ -605,6 +613,103 @@ function commandStart(flags: Record<string, string | boolean>): void {
   }
 }
 
+// ---------------------------------------------------------------------------
+// update — fast-forward this node's checkout and rebuild ONLY when the daemon
+// actually changed, then restart the service. Fast-forward only: it never runs
+// `git reset --hard` over local commits or uncommitted edits.
+// ---------------------------------------------------------------------------
+
+/** Git work-tree root that contains this daemon build (walks up from dist/). */
+function daemonRepoDir(pkgDir: string): string {
+  const top = capture("git", ["-C", pkgDir, "rev-parse", "--show-toplevel"]);
+  return top || pkgDir;
+}
+
+function commandUpdate(_flags: Record<string, string | boolean>): void {
+  requireLinux("Updating the daemon");
+  requireRoot("Updating the daemon");
+
+  // dist/cli.js → <package> (parent of dist); the git root may be the monorepo
+  // above it (apps/daemon lives inside the checkout).
+  const pkgDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
+  const repoDir = daemonRepoDir(pkgDir);
+
+  if (!fs.existsSync(path.join(repoDir, ".git"))) {
+    die(
+      `No git checkout found at ${repoDir}. Self-update needs the daemon installed from a git ` +
+        "clone. Re-run the panel install command to refresh it instead.",
+    );
+  }
+
+  const gitCap = (args: string[]): string => capture("git", ["-C", repoDir, ...args]);
+  const gitQuiet = (args: string[]): boolean =>
+    spawnSync("git", ["-C", repoDir, ...args], { stdio: "ignore" }).status === 0;
+
+  const branch = gitCap(["rev-parse", "--abbrev-ref", "HEAD"]) || "main";
+  const shallow = gitCap(["rev-parse", "--is-shallow-repository"]) === "true";
+
+  say(`Checking for updates in ${repoDir} (branch ${branch})…`);
+
+  // A depth-1 clone (how the installer clones) can neither fast-forward nor diff
+  // across commits, so deepen it to full history before the first update.
+  const fetched = shallow
+    ? gitQuiet(["fetch", "--unshallow", "origin", branch]) || gitQuiet(["fetch", "origin", branch])
+    : gitQuiet(["fetch", "origin", branch]);
+  if (!fetched) die("git fetch failed. Check the node's network and DNS, then retry.");
+
+  const oldRev = gitCap(["rev-parse", "HEAD"]);
+
+  // Fast-forward only — refuses to run over local commits or uncommitted edits
+  // to tracked files, so local work is never destroyed (no reset --hard).
+  if (!gitQuiet(["merge", "--ff-only", "FETCH_HEAD"])) {
+    die(
+      `Cannot fast-forward ${repoDir} to origin/${branch}. This usually means local commits or ` +
+        `uncommitted changes to tracked files. Inspect: git -C ${repoDir} status. Nothing was changed.`,
+    );
+  }
+
+  const newRev = gitCap(["rev-parse", "HEAD"]);
+  const changed = oldRev && newRev ? gitCap(["diff", "--name-only", oldRev, newRev]) : "";
+  const changedFiles = changed.split("\n").map((line) => line.trim()).filter(Boolean);
+
+  if (changedFiles.length === 0) {
+    ok("Daemon already up to date.");
+    return;
+  }
+
+  const daemonChanged = changedFiles.some((file) => file.startsWith("apps/daemon/"));
+  const lockChanged = changedFiles.some(
+    (file) => file === "package-lock.json" || file === "apps/daemon/package.json",
+  );
+
+  if (!daemonChanged) {
+    ok(`Updated ${oldRev.slice(0, 7)} → ${newRev.slice(0, 7)}; no daemon changes, restart skipped.`);
+    return;
+  }
+
+  if (lockChanged) {
+    say("Installing dependencies (lockfile changed)…");
+    if (spawnSync("npm", ["install", "--no-audit", "--no-fund"], { stdio: "inherit", cwd: repoDir }).status !== 0) {
+      die("npm install failed; resolve the error above and re-run `spanel-daemon update`.");
+    }
+  } else {
+    note("Dependencies unchanged; skipping npm install.");
+  }
+
+  say("Building the daemon…");
+  if (spawnSync("npm", ["run", "build"], { stdio: "inherit", cwd: pkgDir }).status !== 0) {
+    die("Daemon build failed; the previous build is left in place. Fix the error above and re-run.");
+  }
+  ok("Daemon rebuilt.");
+
+  if (has("systemctl")) {
+    run("systemctl", ["restart", SERVICE_NAME]);
+    ok(`${SERVICE_NAME} restarted (${oldRev.slice(0, 7)} → ${newRev.slice(0, 7)}).`);
+  } else {
+    warn("systemd not detected; restart the daemon with your supervisor to apply the update.");
+  }
+}
+
 function commandHelp(): void {
   process.stdout.write(`${C.blue}SPanel daemon${C.reset} — node agent CLI
 
@@ -619,6 +724,7 @@ ${C.dim}Usage${C.reset}
   spanel-daemon configure  --panel <url> --token-id <id> --token <token> [--config <path>]
   spanel-daemon doctor     [--config <path>]
   spanel-daemon service    install|start|stop|restart|status|logs
+  spanel-daemon update
   spanel-daemon start      [--config <path>]
   spanel-daemon version
 
@@ -629,6 +735,10 @@ ${C.dim}What each command does${C.reset}
   configure  Re-fetches config.yml from the panel using the token pair (no system
              changes). Use it after rotating the token, then:
              ${C.green}sudo spanel-daemon service restart${C.reset}
+  update     Fast-forwards this node's checkout and, only when the daemon changed,
+             rebuilds it and restarts spanel-daemon (npm install runs only if the
+             lockfile changed). Fast-forward only — never resets over local edits.
+             Needs root.
   doctor     Health check — Node, Docker, the config, the data directory and
              whether the panel accepts this node's credentials.
 
@@ -659,11 +769,14 @@ async function main(): Promise<void> {
     case "service":
       commandService(sub);
       return;
+    case "update":
+      commandUpdate(flags);
+      return;
     case "doctor":
       await commandDoctor(flags);
       return;
     case "version":
-      process.stdout.write(`spanel-daemon 1.0.0 (node ${process.versions.node}, ${os.platform()}/${process.arch})\n`);
+      process.stdout.write(`spanel-daemon ${VERSION} (node ${process.versions.node}, ${os.platform()}/${process.arch})\n`);
       return;
     case "help":
     case "--help":

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { HardDrive, Plus, RefreshCw, Server, Trash2, Wifi } from "lucide-react";
+import { HardDrive, Plus, Server, Trash2, Wifi } from "lucide-react";
 import { createLocationAction, deleteNodeAction, testNodeAction, type NodeState } from "./actions";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button, SubmitButton } from "@/components/ui/button";
@@ -16,6 +16,7 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { formatMib, relativeTime } from "@/lib/utils";
 import { NodeForm, EMPTY_NODE } from "./node-form";
+import { HealthHeart, heartTitle } from "./health-heart";
 import { useActionState } from "react";
 import { useT } from "@/lib/i18n/preferences";
 
@@ -51,34 +52,21 @@ export interface NodeRow {
   } | null;
 }
 
-const HEALTH_TONE: Record<NodeHealth, "ok" | "warn" | "bad" | "neutral"> = {
-  online: "ok",
-  degraded: "warn",
-  offline: "bad",
-  unknown: "neutral",
-};
-
-const HEALTH_KEY: Record<NodeHealth, "admin.healthOnline" | "admin.healthDegraded" | "admin.healthOffline" | "admin.healthUnknown"> = {
-  online: "admin.healthOnline",
-  degraded: "admin.healthDegraded",
-  offline: "admin.healthOffline",
-  unknown: "admin.healthUnknown",
-};
-
-/** Refresh interval for the node list; matches the daemon heartbeat cadence. */
-const POLL_MS = 15_000;
+/** Node list refresh cadence — near-real-time so hearts reflect liveness quickly. */
+const POLL_MS = 1000;
 
 export function NodeList({
   nodes,
   locations,
+  plans,
 }: {
   nodes: NodeRow[];
   locations: { id: number; name: string; shortCode: string }[];
+  plans: { id: number; name: string }[];
 }) {
   const [createOpen, setCreateOpen] = useState(false);
   const [locationOpen, setLocationOpen] = useState(false);
   const [testingId, setTestingId] = useState<number | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const [locationState, locationAction] = useActionState<NodeState, FormData>(createLocationAction, {});
   const toast = useToast();
   const router = useRouter();
@@ -87,10 +75,10 @@ export function NodeList({
 
   // Live health without a websocket: re-render the server component on a timer.
   useEffect(() => {
-    if (!autoRefresh || nodes.length === 0) return;
+    if (nodes.length === 0) return;
     const timer = setInterval(() => router.refresh(), POLL_MS);
     return () => clearInterval(timer);
-  }, [autoRefresh, nodes.length, router]);
+  }, [nodes.length, router]);
 
   const report = (result: NodeState) => {
     if (result.error) toast.push(result.error, "bad");
@@ -100,27 +88,15 @@ export function NodeList({
 
   return (
     <>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-        <label className="flex cursor-pointer items-center gap-2 text-xs text-ink-dim">
-          <input
-            type="checkbox"
-            checked={autoRefresh}
-            onChange={(event) => setAutoRefresh(event.target.checked)}
-            className="size-3.5 cursor-pointer rounded border-line bg-canvas accent-brand"
-          />
-          <RefreshCw className={`size-3 ${autoRefresh ? "text-ok" : ""}`} />
-          {t("admin.nlAutoRefresh", { seconds: POLL_MS / 1000 })}
-        </label>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="ghost" onClick={() => setLocationOpen(true)}>
-            <Plus className="size-3.5" />
-            {t("admin.nlAddLocation")}
-          </Button>
-          <Button onClick={() => setCreateOpen(true)}>
-            <Plus className="size-3.5" />
-            {t("admin.addNode")}
-          </Button>
-        </div>
+      <div className="mb-4 flex flex-wrap items-center justify-end gap-2">
+        <Button variant="ghost" onClick={() => setLocationOpen(true)}>
+          <Plus className="size-3.5" />
+          {t("admin.nlAddLocation")}
+        </Button>
+        <Button onClick={() => setCreateOpen(true)}>
+          <Plus className="size-3.5" />
+          {t("admin.addNode")}
+        </Button>
       </div>
 
       {nodes.length === 0 ? (
@@ -144,10 +120,10 @@ export function NodeList({
               <CardHeader
                 title={
                   <span className="flex flex-wrap items-center gap-2">
+                    <HealthHeart health={node.health} title={heartTitle(node.health, node.daemonVersion)} />
                     <Link href={`/admin/nodes/${node.id}`} className="hover:text-brand-soft">
                       {node.name}
                     </Link>
-                    <Badge tone={HEALTH_TONE[node.health]}>{t(HEALTH_KEY[node.health])}</Badge>
                     {node.maintenanceMode ? <Badge tone="warn">{t("admin.nlMaintenance")}</Badge> : null}
                     {!node.public ? <Badge tone="neutral">{t("admin.dmPrivate")}</Badge> : null}
                   </span>
@@ -280,7 +256,7 @@ export function NodeList({
         description={t("admin.nlAddNodeDesc")}
         width="lg"
       >
-        <NodeForm mode="create" values={EMPTY_NODE} locations={locations} onDone={() => setCreateOpen(false)} />
+        <NodeForm mode="create" values={EMPTY_NODE} locations={locations} plans={plans} onDone={() => setCreateOpen(false)} />
       </Modal>
 
       <Modal open={locationOpen} onClose={() => setLocationOpen(false)} title={t("admin.nlAddLocation")} description={t("admin.nlAddLocationDesc")}>

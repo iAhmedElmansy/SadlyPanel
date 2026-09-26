@@ -1,5 +1,5 @@
 import { prisma } from "../db";
-import type { Package } from "@prisma/client";
+import type { Package, Plan } from "@prisma/client";
 
 /**
  * Subscription/entitlement layer.
@@ -139,5 +139,57 @@ export async function assertUserCanUsePackage(user: EntitlementUser, packageId: 
     error: requiredPlanName
       ? `This package requires the ${requiredPlanName} plan. Upgrade your plan to deploy it.`
       : "This package is not available on your current plan.",
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Node → plan gating (mirrors the package rules above)
+//
+// A node with requiredPlanId set is only selectable by users whose plan is that
+// plan, or a higher tier (lower/equal sortOrder). Nodes with no requiredPlanId
+// are open to everyone (including plan-less users). Admins are never gated.
+// ---------------------------------------------------------------------------
+
+/** Full plan row for the user, used for quota display + node gating. Null when unassigned. */
+export async function getUserPlan(userId: number): Promise<Plan | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { plan: true } });
+  return user?.plan ?? null;
+}
+
+/** Pure check: does the user's plan satisfy a node's minimum-plan requirement? */
+export function planSatisfiesNode(
+  node: { requiredPlanId: number | null; requiredPlan?: { sortOrder: number } | null },
+  plan: { id: number; sortOrder: number } | null,
+): boolean {
+  if (node.requiredPlanId === null) return true;
+  if (!plan) return false;
+  if (plan.id === node.requiredPlanId) return true;
+  return node.requiredPlan ? plan.sortOrder <= node.requiredPlan.sortOrder : false;
+}
+
+/**
+ * Server-side gate for node selection in the self-service wizard. Returns
+ * ok=false with a client-safe message (and the required plan name) when the
+ * node is reserved for a plan the user doesn't hold.
+ */
+export async function assertUserCanUseNode(user: EntitlementUser, nodeId: number): Promise<EntitlementCheck> {
+  if (isAdmin(user)) return { ok: true };
+
+  const node = await prisma.node.findUnique({
+    where: { id: nodeId },
+    select: { requiredPlanId: true, requiredPlan: { select: { name: true, sortOrder: true } } },
+  });
+  if (!node || node.requiredPlanId === null) return { ok: true };
+
+  const plan = await userPlan(user.id);
+  if (planSatisfiesNode(node, plan)) return { ok: true };
+
+  const requiredPlanName = node.requiredPlan?.name;
+  return {
+    ok: false,
+    requiredPlanName: requiredPlanName ?? undefined,
+    error: requiredPlanName
+      ? `This node is reserved for the ${requiredPlanName} plan. Upgrade your plan to deploy here.`
+      : "This node is not available on your current plan.",
   };
 }

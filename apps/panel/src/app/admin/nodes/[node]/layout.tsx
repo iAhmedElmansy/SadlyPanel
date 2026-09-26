@@ -6,20 +6,12 @@ import { prisma } from "@/lib/db";
 import { requirePermission } from "@/lib/auth/session";
 import { healthOf } from "@/lib/services/heartbeat";
 import { PageHeader } from "@/components/layout/page-header";
-import { Badge } from "@/components/ui/badge";
+import { HealthHeart, heartTitle } from "../health-heart";
 import { Tabs } from "@/components/layout/tabs";
 import { relativeTime } from "@/lib/utils";
 import { getT } from "@/lib/i18n/server";
 
 export const dynamic = "force-dynamic";
-
-const HEALTH_TONE = { online: "ok", degraded: "warn", offline: "bad", unknown: "neutral" } as const;
-const HEALTH_KEY = {
-  online: "admin.healthOnline",
-  degraded: "admin.healthDegraded",
-  offline: "admin.healthOffline",
-  unknown: "admin.healthUnknown",
-} as const;
 
 export default async function NodeLayout({
   children,
@@ -52,7 +44,7 @@ export default async function NodeLayout({
         description={`${node.scheme}://${node.fqdn}:${node.daemonPort}`}
         actions={
           <span className="flex items-center gap-2">
-            <Badge tone={HEALTH_TONE[health]}>{t(HEALTH_KEY[health])}</Badge>
+            <HealthHeart health={health} title={heartTitle(health, node.daemonVersion)} size="size-5" />
             <span className="text-xs text-ink-dim">{relativeTime(node.lastHeartbeatAt?.toISOString() ?? null)}</span>
           </span>
         }

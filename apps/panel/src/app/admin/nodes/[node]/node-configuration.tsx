@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronDown, ChevronRight, KeyRound, RefreshCw, Wifi } from "lucide-react";
+import { ChevronDown, ChevronRight, KeyRound, RefreshCw, Wifi, SlidersHorizontal } from "lucide-react";
 import { rotateNodeTokenAction, testNodeAction, type NodeState } from "../actions";
+import type { ServiceCommands } from "@/lib/services/node-config";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { CodeBlock } from "@/components/ui/copy-button";
@@ -16,12 +17,14 @@ export function NodeConfiguration({
   installCommand,
   nodeInstallCommand,
   configureCommand,
+  serviceCommands,
 }: {
   nodeId: number;
   config: string;
   installCommand: string;
   nodeInstallCommand: string;
   configureCommand: string;
+  serviceCommands: ServiceCommands;
 }) {
   const [busy, setBusy] = useState<"test" | "rotate" | null>(null);
   const [showAlternates, setShowAlternates] = useState(false);
@@ -113,18 +116,48 @@ export function NodeConfiguration({
                   <p className="text-xs text-ink-dim">Same installer, skipping the step that installs Node.js.</p>
                   <CodeBlock value={nodeInstallCommand} maxHeight="max-h-40" label="Copy command" />
                 </div>
-                <div className="space-y-2">
-                  <p className="text-xs font-medium text-ink">Reconfigure / rotate token</p>
-                  <p className="text-xs text-ink-dim">
-                    Rewrites <span className="font-mono">/etc/spanel/config.yml</span> from the panel without touching the
-                    system. Use it after rotating the token. Restart afterwards with{" "}
-                    <span className="font-mono">sudo spanel-daemon service restart</span>.
-                  </p>
-                  <CodeBlock value={configureCommand} maxHeight="max-h-40" label="Copy command" />
-                </div>
               </div>
             ) : null}
           </div>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader
+          title="Set configuration only"
+          description="Already installed the daemon? Point it at this node without touching Docker, the user or the service."
+          action={
+            <span className="flex items-center gap-1.5 text-xs text-ink-dim">
+              <SlidersHorizontal className="size-3" />
+              no system changes
+            </span>
+          }
+        />
+        <CardBody className="space-y-3">
+          <p className="text-xs text-ink-muted">
+            Run this on the node. It rewrites <span className="font-mono">/etc/spanel/config.yml</span> from the panel
+            using the token pair — nothing else on the system is changed. Use it after rotating the token or moving the
+            node between panels.
+          </p>
+          <CodeBlock value={configureCommand} maxHeight="max-h-40" label="Copy configure command" />
+          <p className="rounded-md border border-ok/30 bg-ok/5 px-3 py-2 text-xs text-ink-muted">
+            On success the console prints{" "}
+            <span className="font-mono text-ok">configuration set successfully</span>. Apply it with a restart:{" "}
+            <span className="font-mono text-ink">{serviceCommands.restart}</span>.
+          </p>
+        </CardBody>
+      </Card>
+
+      <Card>
+        <CardHeader title="Service control" description="Manage the daemon with systemd once it is installed." />
+        <CardBody className="space-y-2 text-xs text-ink-muted">
+          <Line command={serviceCommands.enable} description="Enable the daemon and start it now (first boot / after install)." />
+          <Line command={serviceCommands.restart} description="Restart after a configuration or token change." />
+          <Line command={serviceCommands.status} description="Is the daemon running?" />
+          <Line command={serviceCommands.stop} description="Stop the daemon." />
+          <Line command={serviceCommands.logs} description="Show the last 120 log lines." />
+          <Line command="sudo spanel-daemon doctor" description="Health check: Node, Docker, config, data directory and panel credentials." />
+          <Line command="sudo spanel-daemon update" description="Fast-forward this node and rebuild + restart only if the daemon changed." />
         </CardBody>
       </Card>
 
@@ -145,17 +178,6 @@ export function NodeConfiguration({
             You normally never edit this by hand: <span className="font-mono">spanel-daemon configure</span> pulls it from
             the panel using the token pair, so re-running the install command always refreshes it.
           </p>
-        </CardBody>
-      </Card>
-
-      <Card>
-        <CardHeader title="Everyday commands" description="Handy once the daemon is installed on the node." />
-        <CardBody className="space-y-2 text-xs text-ink-muted">
-          <Line command="sudo spanel-daemon doctor" description="Health check: Node, Docker, config, data directory and panel credentials." />
-          <Line command="sudo spanel-daemon service status" description="Is the daemon running?" />
-          <Line command="sudo spanel-daemon service restart" description="Restart after a config or token change." />
-          <Line command="sudo spanel-daemon service logs" description="Show the last 120 log lines." />
-          <Line command="sudo spanel-daemon start" description="Run in the foreground to watch it start (debugging)." />
         </CardBody>
       </Card>
       {dialog}

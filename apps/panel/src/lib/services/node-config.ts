@@ -108,24 +108,56 @@ token: ${options.redactToken ? "<hidden — use the install command>" : options.
 }
 
 /**
+ * SSL flags for the installer one-liners. The panel already knows whether this
+ * node is addressed over HTTPS directly (scheme https, not behind a proxy), so
+ * it drives the installer's SSL choice non-interactively — the one-liner is
+ * piped into `node`/`bash`, where the interactive prompt in daemon.mjs cannot
+ * read a TTY. Running daemon.mjs by hand (no flags) still shows the prompt.
+ */
+function sslFlagsFor(node: Node): string {
+  const sslEnabled = node.scheme === "https" && !node.behindProxy;
+  return sslEnabled ? ` --ssl --fqdn ${node.fqdn}` : " --no-ssl";
+}
+
+/**
  * One-line bootstrap — a single line so it pastes into a terminal in one go
  * (no `\` continuations, which frequently break on paste). The shell part only
  * guarantees curl + Node.js exist; every install step after that runs in Node
  * (see public/install/daemon.mjs).
  */
 export function renderInstallCommand(node: Node, options: DaemonConfigOptions): string {
-  return `curl -fsSL ${options.panelUrl}/install/daemon.sh | sudo bash -s -- --panel ${options.panelUrl} --token-id ${node.daemonTokenId} --token ${options.token} --port ${node.daemonPort}`;
+  return `curl -fsSL ${options.panelUrl}/install/daemon.sh | sudo bash -s -- --panel ${options.panelUrl} --token-id ${node.daemonTokenId} --token ${options.token} --port ${node.daemonPort}${sslFlagsFor(node)}`;
 }
 
 /** Single-line equivalent for when Node.js 20+ is already installed on the machine. */
 export function renderNodeInstallCommand(node: Node, options: DaemonConfigOptions): string {
-  return `curl -fsSL ${options.panelUrl}/install/daemon.mjs -o /tmp/spanel-install.mjs && sudo node /tmp/spanel-install.mjs --panel ${options.panelUrl} --token-id ${node.daemonTokenId} --token ${options.token} --port ${node.daemonPort}`;
+  return `curl -fsSL ${options.panelUrl}/install/daemon.mjs -o /tmp/spanel-install.mjs && sudo node /tmp/spanel-install.mjs --panel ${options.panelUrl} --token-id ${node.daemonTokenId} --token ${options.token} --port ${node.daemonPort}${sslFlagsFor(node)}`;
 }
 
 /**
  * Reconfigures an existing install against this node (no system changes).
- * Uses the global `spanel-daemon` binary that `install` sets up.
+ * Uses the global `spanel-daemon` binary that `install` sets up. On success the
+ * daemon prints "configuration set successfully" to the console.
  */
 export function renderConfigureCommand(node: Node, options: DaemonConfigOptions): string {
   return `sudo spanel-daemon configure --panel ${options.panelUrl} --token-id ${node.daemonTokenId} --token ${options.token}`;
+}
+
+/** systemd service-control commands for the node operator (fixed service name). */
+export interface ServiceCommands {
+  enable: string;
+  restart: string;
+  status: string;
+  stop: string;
+  logs: string;
+}
+
+export function renderServiceCommands(): ServiceCommands {
+  return {
+    enable: "sudo systemctl enable --now spanel-daemon",
+    restart: "sudo systemctl restart spanel-daemon",
+    status: "sudo systemctl status spanel-daemon",
+    stop: "sudo systemctl stop spanel-daemon",
+    logs: "sudo journalctl -u spanel-daemon -n 120 --no-pager",
+  };
 }

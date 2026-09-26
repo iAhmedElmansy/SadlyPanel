@@ -21,7 +21,10 @@ export default async function NodeSettingsPage({ params }: { params: Promise<{ n
   const node = await prisma.node.findUnique({ where: { id: nodeId } });
   if (!node) notFound();
 
-  const locations = await prisma.location.findMany({ orderBy: { shortCode: "asc" } });
+  const [locations, plans] = await Promise.all([
+    prisma.location.findMany({ orderBy: { shortCode: "asc" } }),
+    prisma.plan.findMany({ orderBy: { sortOrder: "asc" }, select: { id: true, name: true } }),
+  ]);
 
   return (
     <Card>
@@ -30,11 +33,13 @@ export default async function NodeSettingsPage({ params }: { params: Promise<{ n
         <NodeForm
           mode="edit"
           locations={locations.map((l) => ({ id: l.id, name: l.name, shortCode: l.shortCode }))}
+          plans={plans}
           values={{
             id: node.id,
             name: node.name,
             description: node.description ?? "",
             locationId: node.locationId,
+            requiredPlanId: node.requiredPlanId,
             fqdn: node.fqdn,
             scheme: node.scheme,
             behindProxy: node.behindProxy,

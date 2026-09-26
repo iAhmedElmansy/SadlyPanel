@@ -14,6 +14,7 @@ export type NavIcon =
   | "Activity"
   | "Boxes"
   | "Cog"
+  | "CreditCard"
   | "Database"
   | "FolderSymlink"
   | "Globe2"
@@ -75,6 +76,10 @@ export const CLIENT_NAV: NavSection[] = [
     items: [{ href: "/dashboard/hosting", label: "Web Hosting", labelKey: "nav.webHostingItem", icon: "Globe2" }],
   },
   {
+    title: "Billing",
+    items: [{ href: "/dashboard/billing", label: "Billing & plans", icon: "CreditCard" }],
+  },
+  {
     title: "Catalog",
     titleKey: "nav.catalog",
     items: [
@@ -112,7 +117,6 @@ export const ADMIN_NAV: NavSection[] = [
     items: [
       { href: "/admin/nodes", label: "Nodes", labelKey: "nav.nodes", icon: "HardDrive", staff: "nodes.view" },
       { href: "/admin/locations", label: "Locations", labelKey: "nav.locations", icon: "MapPin", staff: "nodes.view" },
-      { href: "/admin/allocations", label: "Ports", labelKey: "nav.ports", icon: "Network" },
       { href: "/admin/databases", label: "Database hosts", labelKey: "nav.databaseHosts", icon: "Database" },
     ],
   },
@@ -131,6 +135,12 @@ export const ADMIN_NAV: NavSection[] = [
     items: [
       { href: "/admin/plans", label: "Plans", labelKey: "nav.plans", icon: "Layers", staff: "plans.manage" },
       { href: "/admin/packages", label: "Packages", labelKey: "nav.packages", icon: "Package", staff: "plans.manage" },
+      // Payments UI is owned by the payments agent. i18n keys are intentionally
+      // omitted so the label renders as-is until those messages exist (a missing
+      // key would otherwise render the raw dotted key). Icons reuse existing
+      // NavIcon keys since the shell's ICONS map is not extended here.
+      { href: "/admin/payments", label: "Payments", icon: "Boxes" },
+      { href: "/admin/settings/payments", label: "Payment settings", icon: "Cog" },
     ],
   },
   {

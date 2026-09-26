@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Check, Package as PackageIcon, Tag } from "lucide-react";
+import { ArrowRight, Check, Layers, Sparkles, Tag } from "lucide-react";
 import { prisma } from "@/lib/db";
+import { getCurrentUser } from "@/lib/auth/session";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Reveal } from "@/components/ui/reveal";
 import { formatCpu, formatMib, formatPrice } from "@/lib/utils";
@@ -42,13 +43,22 @@ function resourceLines(
 
 export default async function PricingPage() {
   const t = await getT();
-  const packages = await prisma.package.findMany({
-    where: { isPublic: true, planId: { not: null } },
-    include: { plan: true },
-    orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
-  });
 
-  const priced = packages.filter((pkg) => pkg.plan !== null);
+  // Subscribable plans come straight from the Plan catalog now (not Packages), so
+  // /pricing shows exactly what a customer can buy on /dashboard/billing.
+  const [plans, authUser] = await Promise.all([
+    prisma.plan.findMany({
+      where: { isActive: true, isPublic: true },
+      orderBy: [{ sortOrder: "asc" }, { priceCents: "asc" }],
+    }),
+    getCurrentUser(),
+  ]);
+
+  let currentPlanId: number | null = null;
+  if (authUser) {
+    const me = await prisma.user.findUnique({ where: { id: authUser.id }, select: { planId: true } });
+    currentPlanId = me?.planId ?? null;
+  }
 
   return (
     <div className="relative overflow-hidden">
@@ -61,77 +71,90 @@ export default async function PricingPage() {
         }}
       />
       <div className="mx-auto w-full max-w-6xl px-4 py-16 sm:px-6">
-      <div className="max-w-2xl animate-in">
-        <span className="badge border-brand/40 bg-brand/12 text-brand-soft">
-          <Tag className="size-3" />
-          {t("public.pricingBadge")}
-        </span>
-        <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{t("public.pricingTitle")}</h1>
-        <p className="mt-3 text-sm text-ink-muted sm:text-base">
-          {t("public.pricingDesc")}
-        </p>
-      </div>
-
-      {priced.length === 0 ? (
-        <div className="panel-card mt-10">
-          <EmptyState
-            icon={<PackageIcon className="size-5" />}
-            title={t("public.plansComingSoon")}
-            description={t("public.plansComingSoonDesc")}
-            action={
-              <Link href="/auth/register" className="btn btn-primary">
-                {t("public.createAccount")}
-                <ArrowRight className="size-4" />
-              </Link>
-            }
-          />
+        <div className="max-w-2xl animate-in">
+          <span className="badge border-brand/40 bg-brand/12 text-brand-soft">
+            <Tag className="size-3" />
+            {t("public.pricingBadge")}
+          </span>
+          <h1 className="mt-4 text-3xl font-semibold tracking-tight text-ink sm:text-4xl">{t("public.pricingTitle")}</h1>
+          <p className="mt-3 text-sm text-ink-muted sm:text-base">{t("public.pricingDesc")}</p>
         </div>
-      ) : (
-        <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-          {priced.map((pkg, i) => {
-            const plan = pkg.plan!;
-            const numeric = plan.billingCycle !== "free" && plan.priceCents > 0;
-            return (
-              <Reveal key={pkg.id} delay={i * 90}>
-                <SpotlightCard className="panel-card lift relative flex h-full flex-col overflow-hidden p-6">
-                  <h2 className="text-base font-semibold text-ink">{pkg.name}</h2>
-                  {pkg.description ? <p className="mt-1 text-sm text-ink-muted">{pkg.description}</p> : null}
 
-                  <div className="mt-5 flex items-baseline gap-1">
-                    <span className="text-3xl font-semibold text-ink">
-                      {numeric ? (
-                        <CountUp
-                          to={plan.priceCents / 100}
-                          currency={plan.currency}
-                          suffix={CYCLE_SUFFIX[plan.billingCycle] ?? ""}
-                        />
+        {plans.length === 0 ? (
+          <div className="panel-card mt-10">
+            <EmptyState
+              icon={<Layers className="size-5" />}
+              title={t("public.plansComingSoon")}
+              description={t("public.plansComingSoonDesc")}
+              action={
+                <Link href="/auth/register" className="btn btn-primary">
+                  {t("public.createAccount")}
+                  <ArrowRight className="size-4" />
+                </Link>
+              }
+            />
+          </div>
+        ) : (
+          <div className="mt-10 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            {plans.map((plan, i) => {
+              const numeric = plan.billingCycle !== "free" && plan.priceCents > 0;
+              const isCurrent = currentPlanId === plan.id;
+              const target = authUser ? `/dashboard/billing?plan=${plan.id}` : "/auth/register";
+              return (
+                <Reveal key={plan.id} delay={i * 90}>
+                  <SpotlightCard className="panel-card lift relative flex h-full flex-col overflow-hidden p-6">
+                    {isCurrent ? (
+                      <span className="badge absolute right-4 top-4 border-ok/40 bg-ok/12 text-ok">
+                        <Check className="size-3" />
+                        {/* Fallback plain text — no dedicated i18n key needed. */}
+                        Current plan
+                      </span>
+                    ) : null}
+                    <h2 className="text-base font-semibold text-ink">{plan.name}</h2>
+                    {plan.description ? <p className="mt-1 text-sm text-ink-muted">{plan.description}</p> : null}
+
+                    <div className="mt-5 flex items-baseline gap-1">
+                      <span className="text-3xl font-semibold text-ink">
+                        {numeric ? (
+                          <CountUp
+                            to={plan.priceCents / 100}
+                            currency={plan.currency}
+                            suffix={CYCLE_SUFFIX[plan.billingCycle] ?? ""}
+                          />
+                        ) : (
+                          formatPrice(plan.priceCents, plan.currency, plan.billingCycle)
+                        )}
+                      </span>
+                    </div>
+
+                    <ul className="mt-5 space-y-2 border-t border-line-soft pt-5 text-sm text-ink-muted">
+                      {resourceLines(plan, t).map((line) => (
+                        <li key={line} className="flex items-center gap-2">
+                          <Check className="size-4 shrink-0 text-ok" />
+                          <span>{line}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <div className="mt-6 pt-2">
+                      {isCurrent ? (
+                        <span className="btn btn-ghost w-full cursor-default opacity-70">
+                          <Sparkles className="size-4" />
+                          Active subscription
+                        </span>
                       ) : (
-                        formatPrice(plan.priceCents, plan.currency, plan.billingCycle)
+                        <Link href={target} className="btn btn-primary w-full">
+                          {t("public.getStarted")}
+                          <ArrowRight className="size-4" />
+                        </Link>
                       )}
-                    </span>
-                  </div>
-
-                  <ul className="mt-5 space-y-2 border-t border-line-soft pt-5 text-sm text-ink-muted">
-                    {resourceLines(plan, t).map((line) => (
-                      <li key={line} className="flex items-center gap-2">
-                        <Check className="size-4 shrink-0 text-ok" />
-                        <span>{line}</span>
-                      </li>
-                    ))}
-                  </ul>
-
-                  <div className="mt-6 pt-2">
-                    <Link href="/auth/register" className="btn btn-primary w-full">
-                      {t("public.getStarted")}
-                      <ArrowRight className="size-4" />
-                    </Link>
-                  </div>
-                </SpotlightCard>
-              </Reveal>
-            );
-          })}
-        </div>
-      )}
+                    </div>
+                  </SpotlightCard>
+                </Reveal>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

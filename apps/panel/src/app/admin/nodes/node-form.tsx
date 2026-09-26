@@ -12,6 +12,7 @@ export interface NodeFormValues {
   name: string;
   description: string;
   locationId: number | null;
+  requiredPlanId: number | null;
   fqdn: string;
   scheme: string;
   behindProxy: boolean;
@@ -37,6 +38,7 @@ export const EMPTY_NODE: NodeFormValues = {
   name: "",
   description: "",
   locationId: null,
+  requiredPlanId: null,
   fqdn: "",
   scheme: "https",
   behindProxy: false,
@@ -61,11 +63,13 @@ export const EMPTY_NODE: NodeFormValues = {
 export function NodeForm({
   values,
   locations,
+  plans,
   mode,
   onDone,
 }: {
   values: NodeFormValues;
   locations: { id: number; name: string; shortCode: string }[];
+  plans: { id: number; name: string }[];
   mode: "create" | "edit";
   onDone?: () => void;
 }) {
@@ -105,6 +109,16 @@ export function NodeForm({
             {locations.map((location) => (
               <option key={location.id} value={location.id}>
                 {location.shortCode} — {location.name}
+              </option>
+            ))}
+          </Select>
+        </Field>
+        <Field label="Required plan" hint="Restrict this node to a plan tier and above. Empty = available to all plans.">
+          <Select name="requiredPlanId" defaultValue={values.requiredPlanId ?? ""}>
+            <option value="">Available to all plans</option>
+            {plans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.name}
               </option>
             ))}
           </Select>

@@ -16,9 +16,10 @@ import { PanelClient } from "./panel-client.js";
 import { HeartbeatReporter } from "./heartbeat.js";
 import type { ServerSpec, SystemInfo } from "./types.js";
 import { HttpError } from "./errors.js";
+import { VERSION } from "./version.js";
 
 const log = createLogger("daemon");
-export const VERSION = "1.0.0";
+export { VERSION };
 
 interface RouteContext {
   request: http.IncomingMessage;

@@ -7,6 +7,7 @@ import {
   renderDaemonConfig,
   renderInstallCommand,
   renderNodeInstallCommand,
+  renderServiceCommands,
   resolvePanelUrl,
 } from "@/lib/services/node-config";
 import { NodeConfiguration } from "../node-configuration";
@@ -34,6 +35,7 @@ export default async function NodeInstallPage({ params }: { params: Promise<{ no
   const installCommand = renderInstallCommand(node, options);
   const nodeInstallCommand = renderNodeInstallCommand(node, options);
   const configureCommand = renderConfigureCommand(node, options);
+  const serviceCommands = renderServiceCommands();
 
   return (
     <NodeConfiguration
@@ -42,6 +44,7 @@ export default async function NodeInstallPage({ params }: { params: Promise<{ no
       installCommand={installCommand}
       nodeInstallCommand={nodeInstallCommand}
       configureCommand={configureCommand}
+      serviceCommands={serviceCommands}
     />
   );
 }

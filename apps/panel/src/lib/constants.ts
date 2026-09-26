@@ -309,6 +309,27 @@ export const BILLING_CYCLES = ["monthly", "yearly", "once", "free"] as const;
 export type BillingCycle = (typeof BILLING_CYCLES)[number];
 
 /**
+ * Payment methods offered at checkout. `paymob`, `stripe` and `paypal` are
+ * automatic (redirect / webhook) gateways; `vodafone_cash` is a manual flow
+ * where the customer uploads a receipt for admin review. Stored on
+ * PaymentOrder.method.
+ */
+export const PAYMENT_METHODS = ["paymob", "stripe", "paypal", "vodafone_cash"] as const;
+export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/** PaymentOrder.status lifecycle values (pay-then-activate). */
+export const PAYMENT_STATUSES = [
+  "pending",
+  "awaiting_review",
+  "paid",
+  "activated",
+  "rejected",
+  "failed",
+  "cancelled",
+] as const;
+export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
+
+/**
  * Currencies offered in the plan pricing UI. ISO 4217 codes stored on
  * Plan.currency. Lives here (not in the plans "use server" actions module)
  * because a plain constant exported from a "use server" file is coerced into a
@@ -364,6 +385,27 @@ export const SETTING_KEYS = {
   passwordRequireNumber: "security.password_require_number",
   passwordRequireSymbol: "security.password_require_symbol",
   maintenanceMode: "site.maintenance_mode",
+  // --- Payments -----------------------------------------------------------
+  // Automatic gateways (Paymob / Stripe / PayPal) + manual Vodafone Cash.
+  // A gateway is offered to customers only when its `.enabled` key is "true"
+  // AND its required credentials are present. Secret keys (marked below) are
+  // encrypted at rest via ENCRYPTED_SETTING_KEYS.
+  paymobEnabled: "payments.paymob.enabled",
+  paymobApiKey: "payments.paymob.apiKey", // secret
+  paymobIntegrationId: "payments.paymob.integrationId",
+  paymobIframeId: "payments.paymob.iframeId", // required to build the hosted checkout redirect
+  paymobHmac: "payments.paymob.hmac", // secret
+  stripeEnabled: "payments.stripe.enabled",
+  stripeSecretKey: "payments.stripe.secretKey", // secret
+  stripeWebhookSecret: "payments.stripe.webhookSecret", // secret
+  stripePublishableKey: "payments.stripe.publishableKey",
+  paypalEnabled: "payments.paypal.enabled",
+  paypalClientId: "payments.paypal.clientId",
+  paypalClientSecret: "payments.paypal.clientSecret", // secret
+  paypalMode: "payments.paypal.mode", // "sandbox" | "live"
+  vodafoneCashEnabled: "payments.vodafone_cash.enabled",
+  vodafoneCashPhone: "payments.vodafone_cash.phone",
+  vodafoneCashInstructions: "payments.vodafone_cash.instructions",
 } as const;
 
 export const DEFAULT_SETTINGS: Record<string, string> = {
@@ -393,7 +435,25 @@ export const DEFAULT_SETTINGS: Record<string, string> = {
   [SETTING_KEYS.passwordRequireNumber]: "true",
   [SETTING_KEYS.passwordRequireSymbol]: "false",
   [SETTING_KEYS.maintenanceMode]: "false",
+  [SETTING_KEYS.paymobEnabled]: "false",
+  [SETTING_KEYS.paymobIntegrationId]: "",
+  [SETTING_KEYS.paymobIframeId]: "",
+  [SETTING_KEYS.stripeEnabled]: "false",
+  [SETTING_KEYS.stripePublishableKey]: "",
+  [SETTING_KEYS.paypalEnabled]: "false",
+  [SETTING_KEYS.paypalClientId]: "",
+  [SETTING_KEYS.paypalMode]: "sandbox",
+  [SETTING_KEYS.vodafoneCashEnabled]: "false",
+  [SETTING_KEYS.vodafoneCashPhone]: "",
+  [SETTING_KEYS.vodafoneCashInstructions]: "",
 };
 
 /** Keys whose values are encrypted before hitting the database. */
-export const ENCRYPTED_SETTING_KEYS: string[] = [SETTING_KEYS.smtpPass];
+export const ENCRYPTED_SETTING_KEYS: string[] = [
+  SETTING_KEYS.smtpPass,
+  SETTING_KEYS.paymobApiKey,
+  SETTING_KEYS.paymobHmac,
+  SETTING_KEYS.stripeSecretKey,
+  SETTING_KEYS.stripeWebhookSecret,
+  SETTING_KEYS.paypalClientSecret,
+];

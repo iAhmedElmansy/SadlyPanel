@@ -236,8 +236,7 @@ export class ServerManager extends EventEmitter {
       emitInstall(`Preparing ${spec.name} (${spec.egg.uuid})`);
 
       if (spec.egg.scriptInstall.trim().length > 0) {
-        const scriptDir = path.join(this.config.system.tmpDirectory, `install-${spec.uuid}`);
-        await fsp.mkdir(scriptDir, { recursive: true });
+        const scriptDir = await this.createInstallScratch(spec.uuid);
         await fsp.writeFile(path.join(scriptDir, "install.sh"), spec.egg.scriptInstall, { mode: 0o755 });
 
         const code = await this.docker.runInstall(spec, this.volumePath(spec.uuid), scriptDir, emitInstall);
@@ -271,6 +270,39 @@ export class ServerManager extends EventEmitter {
       emitInstall(`Installation failed: ${message}`);
       finish(false, message);
     }
+  }
+
+  /**
+   * Creates a private, writable scratch directory for an egg's install script.
+   *
+   * Prefers the configured tmp directory (usually /tmp/spanel), but falls back
+   * to a directory under the daemon's own data dir when that base isn't
+   * writable — which happens when the installer created /tmp/spanel as root and
+   * never chowned it to the spanel service user (the cause of
+   * "EACCES: permission denied, mkdir '/tmp/spanel/install-…'"). The data dir is
+   * always owned by the daemon user, so this self-heals without a reinstall.
+   */
+  private async createInstallScratch(uuid: string): Promise<string> {
+    const bases = [this.config.system.tmpDirectory, path.join(this.config.system.data, ".tmp")];
+    let lastError: unknown;
+    for (const base of bases) {
+      try {
+        await fsp.mkdir(base, { recursive: true });
+        const dir = path.join(base, `install-${uuid}`);
+        await fsp.mkdir(dir, { recursive: true });
+        // A recursive mkdir on a pre-existing, wrong-owner dir doesn't throw, so
+        // confirm we can actually write before committing to this location.
+        await fsp.access(dir, fs.constants.W_OK);
+        return dir;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    throw new Error(
+      `No writable install scratch directory. Run \`chown -R spanel:spanel ${this.config.system.tmpDirectory}\` on the node, or reinstall the daemon. (${
+        lastError instanceof Error ? lastError.message : String(lastError)
+      })`,
+    );
   }
 
   /** Applies a new spec: rewrites metadata and recreates the container if needed. */

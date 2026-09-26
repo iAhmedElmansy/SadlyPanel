@@ -25,6 +25,7 @@ import { spawnSync } from "node:child_process";
 import { createHmac } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import { createInterface } from "node:readline";
 
 const INSTALL_DIR = "/opt/spanel-daemon";
 const CONFIG_PATH = "/etc/spanel/config.yml";
@@ -65,6 +66,12 @@ const daemonPort = String(flags.port ?? 8080);
 const dataDir = typeof flags.data === "string" ? flags.data : DEFAULT_DATA;
 const repo = typeof flags.repo === "string" ? flags.repo : process.env.SPANEL_DAEMON_REPO ?? "";
 const tarball = typeof flags.tarball === "string" ? flags.tarball : "";
+const sslEmailFlag =
+  typeof flags["ssl-email"] === "string"
+    ? flags["ssl-email"]
+    : typeof flags.email === "string"
+      ? flags.email
+      : process.env.SPANEL_SSL_EMAIL ?? "";
 
 if (flags.help === true) {
   process.stdout.write(`SPanel daemon installer
@@ -74,6 +81,10 @@ if (flags.help === true) {
   --token <token>     node token (required)
   --port <n>          daemon API port (default 8080)
   --data <dir>        volumes directory (default ${DEFAULT_DATA})
+  --fqdn <host>       node FQDN for the TLS certificate (default: hostname -f)
+  --ssl               enable HTTPS (obtain a Let's Encrypt cert, serve wss)
+  --no-ssl            force plain HTTP, skip the SSL prompt
+  --ssl-email <addr>  Let's Encrypt registration email (default admin@<apex>)
   --repo <git-url>    daemon git repository to clone
   --tarball <url>     daemon tarball to download instead of git
   --skip-packages     do not touch the package manager
@@ -102,6 +113,154 @@ const capture = (script) => {
   return result.status === 0 ? result.stdout.trim() : "";
 };
 const has = (command) => quiet(`command -v ${command} >/dev/null 2>&1`);
+
+// ---------------------------------------------------------------------- ssl
+const isIpv4 = (value) => /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/.test(value);
+const isHostname = (value) => /^[A-Za-z0-9.-]+$/.test(value);
+
+/** Parse a tri-state boolean from env/flag values: true, false or undefined. */
+const parseBool = (value) => {
+  if (value === undefined || value === null || value === "") return undefined;
+  return ["1", "true", "yes", "on", "y"].includes(String(value).toLowerCase());
+};
+
+/** Interactive [y/N] prompt using only Node built-ins (readline). */
+function askYesNo(question, defaultYes) {
+  return new Promise((resolve) => {
+    const rl = createInterface({ input: process.stdin, output: process.stdout });
+    const suffix = defaultYes ? "[Y/n]" : "[y/N]";
+    rl.question(`${C.blue}[?]${C.reset} ${question} ${suffix} `, (answer) => {
+      rl.close();
+      const normalized = String(answer).trim().toLowerCase();
+      resolve(normalized === "" ? defaultYes : normalized === "y" || normalized === "yes");
+    });
+  });
+}
+
+/**
+ * Decide whether to enable SSL. Precedence: --no-ssl / --ssl flag, then the
+ * SPANEL_SSL env var, then an interactive prompt (only on a TTY), else off.
+ */
+async function resolveSslChoice() {
+  if (flags["no-ssl"] === true || parseBool(flags["no-ssl"])) return false;
+  if (flags.ssl === true || parseBool(flags.ssl)) return true;
+  const envChoice = parseBool(process.env.SPANEL_SSL);
+  if (envChoice !== undefined) return envChoice;
+  if (process.stdin.isTTY) return askYesNo("Enable SSL (HTTPS) for this daemon?", false);
+  return false;
+}
+
+/** Let's Encrypt registration email: explicit if valid, else admin@<apex>. */
+function acmeEmail(explicit, host) {
+  if (explicit && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(explicit)) return explicit;
+  const parts = host.split(".");
+  return parts.length >= 2 ? `admin@${parts.slice(-2).join(".")}` : "";
+}
+
+/**
+ * Obtain a TLS certificate for the node FQDN with certbot's standalone plugin
+ * (the daemon terminates TLS itself; there is no reverse proxy for the API).
+ * Returns true only when the certificate is present on disk afterwards.
+ */
+function obtainDaemonCertificate(host) {
+  if (!has("certbot")) {
+    warn("certbot is not installed; cannot obtain a TLS certificate. Install it and re-run, or use --no-ssl.");
+    return false;
+  }
+  const email = acmeEmail(sslEmailFlag, host);
+  const emailArg = email ? `-m ${email}` : "--register-unsafely-without-email";
+  // certbot --standalone binds port 80; stop nginx for the issuance if it holds
+  // it, then bring it back so the daemon's vhost proxy keeps working.
+  const nginxActive = quiet("systemctl is-active --quiet nginx");
+  if (nginxActive) sh("systemctl stop nginx", true);
+  say(`Obtaining a Let's Encrypt certificate for ${host} (certbot --standalone)…`);
+  sh(`certbot certonly --standalone -d ${host} --agree-tos ${emailArg} --non-interactive --keep-until-expiring`, true);
+  if (nginxActive) sh("systemctl start nginx", true);
+
+  const certFile = `/etc/letsencrypt/live/${host}/fullchain.pem`;
+  if (fs.existsSync(certFile)) {
+    ok(`Certificate ready at /etc/letsencrypt/live/${host}/.`);
+    return true;
+  }
+  warn(`certbot did not produce ${certFile}. Port 80 may be in use (stop nginx) or DNS for ${host} may not point here yet.`);
+  return false;
+}
+
+/**
+ * Force the api.ssl block in a config.yml string to point at the node's
+ * Let's Encrypt certificate. Only the ssl: child lines are touched, so
+ * proxy.enabled and other keys are left alone.
+ */
+function enableSslInConfig(text, host) {
+  const certDir = `/etc/letsencrypt/live/${host}`;
+  const lines = text.split("\n");
+  let sslIndent = -1;
+  const out = [];
+  for (const line of lines) {
+    const header = line.match(/^(\s*)ssl:\s*$/);
+    if (header) {
+      sslIndent = header[1].length;
+      out.push(line);
+      continue;
+    }
+    if (sslIndent >= 0) {
+      const indent = (line.match(/^(\s*)/) ?? ["", ""])[1].length;
+      if (line.trim() !== "" && indent > sslIndent) {
+        const pad = " ".repeat(sslIndent + 2);
+        if (/^\s*enabled:/.test(line)) { out.push(`${pad}enabled: true`); continue; }
+        if (/^\s*cert:/.test(line)) { out.push(`${pad}cert: ${certDir}/fullchain.pem`); continue; }
+        if (/^\s*key:/.test(line)) { out.push(`${pad}key: ${certDir}/privkey.pem`); continue; }
+        out.push(line);
+        continue;
+      }
+      sslIndent = -1; // dedented out of the ssl block
+    }
+    out.push(line);
+  }
+  return out.join("\n");
+}
+
+/** Read config.yml, enable HTTPS in it, and restart the daemon if it changed. */
+function applySslToConfigFile(configPath, host) {
+  if (!fs.existsSync(configPath)) {
+    warn(`${configPath} not found; cannot enable HTTPS in the daemon config.`);
+    return;
+  }
+  const original = fs.readFileSync(configPath, "utf8");
+  const patched = enableSslInConfig(original, host);
+  if (patched === original) {
+    ok("Daemon config already set for HTTPS.");
+    return;
+  }
+  fs.writeFileSync(configPath, patched, { mode: 0o640 });
+  sh(`chgrp spanel ${configPath} 2>/dev/null || true`, true);
+  ok("Enabled HTTPS in the daemon config.");
+  if (has("systemctl")) {
+    sh(`systemctl restart ${SERVICE}`, true);
+    ok(`${SERVICE} restarted with HTTPS.`);
+  }
+}
+
+// ---------------------------------------------------------------------- ssl?
+// Ask once, up front — before the long package/clone/build steps — so the
+// operator isn't surprised by a prompt after a multi-minute wait. The actual
+// certificate is issued at the very end, once certbot is installed and the
+// daemon config exists. When run through a pipe (curl … | node) stdin is not a
+// TTY, so the prompt is skipped; use --ssl/--no-ssl or SPANEL_SSL in that case.
+const nodeFqdn =
+  typeof flags.fqdn === "string" && flags.fqdn.trim()
+    ? flags.fqdn.trim()
+    : capture("hostname -f") || capture("hostname") || "";
+const wantSsl = await resolveSslChoice();
+const sslDomainOk = isHostname(nodeFqdn) && !isIpv4(nodeFqdn) && nodeFqdn.includes(".");
+if (wantSsl && !sslDomainOk) {
+  warn(
+    `SSL was requested but "${nodeFqdn || "this host"}" is not a domain name. Pass ` +
+      "--fqdn <domain> pointing at this node. Continuing over plain HTTP.",
+  );
+}
+const enableSsl = wantSsl && sslDomainOk;
+if (enableSsl) say(`SSL enabled — a Let's Encrypt certificate for ${nodeFqdn} will be issued after setup.`);
 
 // ------------------------------------------------------------------ packages
 const manager = has("apt-get") ? "apt" : has("dnf") ? "dnf" : null;
@@ -327,6 +486,16 @@ WantedBy=multi-user.target
     sh("systemctl daemon-reload", true);
     sh(`systemctl enable ${SERVICE}`, true);
     ok("systemd unit installed.");
+  }
+}
+
+// ------------------------------------------------------------------- tls (ssl)
+if (enableSsl) {
+  if (obtainDaemonCertificate(nodeFqdn)) {
+    applySslToConfigFile(CONFIG_PATH, nodeFqdn);
+    note(`This node now serves HTTPS. In the panel set its scheme to https, FQDN to ${nodeFqdn}, behind-proxy OFF.`);
+  } else {
+    warn("Continuing without HTTPS; fix the issue above and re-run with --ssl once a certificate can be issued.");
   }
 }
 
