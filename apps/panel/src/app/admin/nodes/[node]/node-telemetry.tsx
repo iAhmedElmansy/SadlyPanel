@@ -14,7 +14,8 @@ import {
   YAxis,
 } from "recharts";
 import { Card, CardBody, CardHeader } from "@/components/ui/card";
-import { HealthHeart, heartTitle } from "../health-heart";
+import { HealthHeart } from "../health-heart";
+import { heartTitle } from "../heart-title";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Activity } from "lucide-react";
 import { formatMib, formatUptime, relativeTime } from "@/lib/utils";

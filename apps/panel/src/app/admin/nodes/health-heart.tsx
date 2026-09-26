@@ -2,9 +2,9 @@
 
 import { Heart, HeartCrack } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Translator } from "@/lib/i18n/translate";
+import type { HeartHealth } from "./heart-title";
 
-export type HeartHealth = "online" | "degraded" | "offline" | "unknown";
+export type { HeartHealth } from "./heart-title";
 
 /**
  * Heartbeat status as a pulsing heart, replacing the old textual Online/Offline
@@ -87,34 +87,3 @@ export function HealthHeart({
   );
 }
 
-/**
- * Builds the hover tooltip text for a heart: the daemon version when healthy,
- * a plain status word otherwise. Pass the active {@link Translator} (from
- * `useT()` in client trees or `getT()` in server trees) to localise it; callers
- * that cannot reach a translator (e.g. a server layout without one in scope)
- * may omit it and get the English wording via the built-in fallback.
- */
-const EN_FALLBACK: Record<string, string> = {
-  "admin.heartTipOffline": "Offline",
-  "admin.heartTipDegraded": "Degraded · heartbeat delayed",
-  "admin.heartTipUnknown": "No heartbeat yet",
-  "admin.heartVersionUnknown": "unknown",
-  "admin.heartTipOnline": "Online · daemon {version}",
-};
-
-function fallback(key: string, vars?: Record<string, string | number>): string {
-  const template = EN_FALLBACK[key] ?? key;
-  return vars ? template.replace(/\{(\w+)\}/g, (match, name: string) => (name in vars ? String(vars[name]) : match)) : template;
-}
-
-export function heartTitle(
-  health: HeartHealth,
-  daemonVersion: string | null | undefined,
-  t?: Translator,
-): string {
-  const tr: Translator = t ?? fallback;
-  if (health === "offline") return tr("admin.heartTipOffline");
-  if (health === "degraded") return tr("admin.heartTipDegraded");
-  if (health === "unknown") return tr("admin.heartTipUnknown");
-  return tr("admin.heartTipOnline", { version: daemonVersion ?? tr("admin.heartVersionUnknown") });
-}

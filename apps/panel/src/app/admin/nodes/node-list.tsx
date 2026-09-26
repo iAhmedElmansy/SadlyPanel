@@ -16,7 +16,8 @@ import { useToast } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { formatMib, relativeTime } from "@/lib/utils";
 import { NodeForm, EMPTY_NODE } from "./node-form";
-import { HealthHeart, heartTitle } from "./health-heart";
+import { HealthHeart } from "./health-heart";
+import { heartTitle } from "./heart-title";
 import { useActionState } from "react";
 import { useT } from "@/lib/i18n/preferences";
 
